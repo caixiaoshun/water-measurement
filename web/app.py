@@ -1,12 +1,12 @@
 """FastAPI backend for the water-measurement Web demo.
 
 Endpoints:
-    GET  /health   – liveness check
-    GET  /config   – current camera & system configuration summary
-    POST /measure  – accepts two pixel coordinates, returns distance + diagnostics
-    GET  /scenarios – list all demo scenarios
-    POST /scenarios/{scenario_id}/run – run all preset cases for a scenario
-    GET  /         – serves the static frontend (index.html)
+    GET  /health            – liveness check
+    GET  /config            – current camera & system configuration summary
+    POST /measure           – accepts two pixel coordinates, returns distance + 3D data
+    GET  /test_cases        – list synthetic test cases with full 3D scene data
+    POST /test_cases/{id}/run – run a test case measurement, return result + 3D data
+    GET  /                  – serves the static frontend (index.html)
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ from vision_ranging import (  # noqa: E402
 )
 
 app = FastAPI(
-    title="Water Measurement Demo",
-    description="Adaptive monocular visual ranging – Web demo",
-    version="1.0.0",
+    title="水面视觉测距系统演示",
+    description="自适应单目视觉测距 – Web 演示",
+    version="2.0.0",
 )
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,9 @@ _DEFAULT_CAMERA = CameraParams(
     D=np.zeros(5, dtype=np.float64),
 )
 
+_DEFAULT_WATER_LEVEL = 0.0
+_DEFAULT_PLANE = Plane.from_height(_DEFAULT_WATER_LEVEL)
+
 # Camera looking down at a water surface at z=0
 _DEFAULT_POSE = Pose(
     R=np.array([
@@ -68,15 +71,12 @@ _DEFAULT_POSE = Pose(
     t=np.array([0.0, -4.8, 6.4], dtype=np.float64),
 )
 
-_DEFAULT_PLANE = Plane.from_height(0.0)
-_DEFAULT_WATER_LEVEL = 0.0
-
 _estimator_cfg = ExtrinsicsEstimatorConfig()
 _estimator = ExtrinsicsEstimator(_estimator_cfg)
 
 
 # ---------------------------------------------------------------------------
-# Geometry helpers (mirrors test helpers)
+# Geometry helpers
 # ---------------------------------------------------------------------------
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -123,302 +123,248 @@ def _euler_deg_to_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Scenario definitions
+# Test case definitions (mirrors patterns from tests/ directory)
 # ---------------------------------------------------------------------------
 
-def _build_scenarios() -> List[Dict[str, Any]]:
-    """Build the 6 demo scenarios with preset measurement cases."""
-    scenarios: List[Dict[str, Any]] = []
+def _build_test_cases() -> List[Dict[str, Any]]:
+    """Build synthetic test cases matching patterns from tests/ directory."""
+    cases: List[Dict[str, Any]] = []
 
-    # Shared base camera (1280x720, 920px focal length)
+    # Shared base camera (1280x720, 920px focal length) – same as _DEFAULT_CAMERA
     base_camera = _DEFAULT_CAMERA
-    base_pose = _look_at_pose(
-        np.array([0.0, -4.8, 6.4], dtype=np.float64),
-        np.array([0.0, 10.0, 0.0], dtype=np.float64),
+
+    # High-resolution camera for complex tests (mirrors test_complex_scenarios.py)
+    hd_camera = CameraParams(
+        name="hd_cam",
+        model="pinhole",
+        width=1920,
+        height=1080,
+        K=np.array([[1380.0, 0.0, 960.0], [0.0, 1385.0, 540.0], [0.0, 0.0, 1.0]], dtype=np.float64),
+        D=np.zeros(5, dtype=np.float64),
     )
 
-    # --- Scenario 1: init (baseline) ---
-    s1_camera = base_camera
-    s1_pose = base_pose
-    s1_plane = Plane.from_height(0.0)
-    s1_wl = 0.0
-
-    s1_p1a = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
-    s1_p1b = np.array([2.5, 10.0, 0.0], dtype=np.float64)
-    s1_uv1 = _project_world_points(np.vstack([s1_p1a, s1_p1b]), s1_camera, s1_pose)
-
-    s1_p2a = np.array([-5.0, 15.0, 0.0], dtype=np.float64)
-    s1_p2b = np.array([5.0, 15.0, 0.0], dtype=np.float64)
-    s1_uv2 = _project_world_points(np.vstack([s1_p2a, s1_p2b]), s1_camera, s1_pose)
-
-    scenarios.append({
-        "id": "init",
-        "name": "初始化基线 / Initialization (Baseline)",
-        "description": "Standard camera setup with ArUco markers, water at z=0. Validates basic measurement accuracy.",
-        "camera": s1_camera,
-        "pose": s1_pose,
-        "plane": s1_plane,
-        "water_level_m": s1_wl,
-        "meta": {
-            "scenario_type": "initialization",
-            "marker_type": "aruco",
-            "water_level_m": 0.0,
-        },
-        "preset_cases": [
-            {
-                "name": "5m baseline at y=10",
-                "point1": {"x": float(s1_uv1[0, 0]), "y": float(s1_uv1[0, 1])},
-                "point2": {"x": float(s1_uv1[1, 0]), "y": float(s1_uv1[1, 1])},
-                "expected_distance_m": 5.0,
-                "threshold_rel": 0.05,
-            },
-            {
-                "name": "10m baseline at y=15",
-                "point1": {"x": float(s1_uv2[0, 0]), "y": float(s1_uv2[0, 1])},
-                "point2": {"x": float(s1_uv2[1, 0]), "y": float(s1_uv2[1, 1])},
-                "expected_distance_m": 10.0,
-                "threshold_rel": 0.05,
-            },
-        ],
+    # --- Case 1: 基线测量 5m (test_basic.py: test_distance_simple_case) ---
+    c1_center = np.array([0.0, -4.8, 6.4], dtype=np.float64)
+    c1_pose = _look_at_pose(c1_center, np.array([0.0, 10.0, 0.0]))
+    c1_p1 = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
+    c1_p2 = np.array([2.5, 10.0, 0.0], dtype=np.float64)
+    c1_uv = _project_world_points(np.vstack([c1_p1, c1_p2]), base_camera, c1_pose)
+    cases.append({
+        "id": "baseline_5m",
+        "name": "基线测量 5m",
+        "description": "标准相机配置，水面 z=0，y=10m 处两点水平距离 5m。对应 test_basic.py 基础测距场景。",
+        "category": "基础测试",
+        "camera": base_camera,
+        "pose": c1_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c1_p1.tolist(),
+        "point2_world": c1_p2.tolist(),
+        "point1_pixel": {"x": float(c1_uv[0, 0]), "y": float(c1_uv[0, 1])},
+        "point2_pixel": {"x": float(c1_uv[1, 0]), "y": float(c1_uv[1, 1])},
+        "expected_distance_m": 5.0,
+        "tags": ["基础", "无噪声", "标准姿态"],
     })
 
-    # --- Scenario 2: attitude_perturb ---
-    R_tilt = _euler_deg_to_matrix(3.0, 0.0, 0.0)  # 3° tilt around x-axis
-    perturbed_R = R_tilt @ base_pose.R
-    base_center = base_pose.camera_center_world()
-    shift = np.array([0.06, 0.04, 0.032], dtype=np.float64)  # norm ≈ 0.08 m
-    perturbed_center = base_center + shift
-    s2_pose = Pose(R=perturbed_R, t=-perturbed_R @ perturbed_center)
-    s2_camera = base_camera
-    s2_plane = Plane.from_height(0.0)
+    # --- Case 2: 基线测量 10m ---
+    c2_p1 = np.array([-5.0, 15.0, 0.0], dtype=np.float64)
+    c2_p2 = np.array([5.0, 15.0, 0.0], dtype=np.float64)
+    c2_uv = _project_world_points(np.vstack([c2_p1, c2_p2]), base_camera, c1_pose)
+    cases.append({
+        "id": "baseline_10m",
+        "name": "基线测量 10m",
+        "description": "标准相机配置，水面 z=0，y=15m 处两点水平距离 10m。验证中等距离精度。",
+        "category": "基础测试",
+        "camera": base_camera,
+        "pose": c1_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c2_p1.tolist(),
+        "point2_world": c2_p2.tolist(),
+        "point1_pixel": {"x": float(c2_uv[0, 0]), "y": float(c2_uv[0, 1])},
+        "point2_pixel": {"x": float(c2_uv[1, 0]), "y": float(c2_uv[1, 1])},
+        "expected_distance_m": 10.0,
+        "tags": ["基础", "无噪声", "标准姿态"],
+    })
 
-    s2_p1a = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
-    s2_p1b = np.array([2.5, 10.0, 0.0], dtype=np.float64)
-    s2_uv1 = _project_world_points(np.vstack([s2_p1a, s2_p1b]), s2_camera, s2_pose)
+    # --- Case 3: 远距离 50m (test_complex_scenarios.py: TestExtremeValues.test_maximum_distance_50m) ---
+    c3_center = np.array([0.0, -20.0, 40.0], dtype=np.float64)
+    c3_pose = _look_at_pose(c3_center, np.array([0.0, 80.0, 0.0]))
+    c3_p1 = np.array([-25.0, 80.0, 0.0], dtype=np.float64)
+    c3_p2 = np.array([25.0, 80.0, 0.0], dtype=np.float64)
+    c3_uv = _project_world_points(np.vstack([c3_p1, c3_p2]), hd_camera, c3_pose)
+    cases.append({
+        "id": "long_range_50m",
+        "name": "远距离测量 50m",
+        "description": "相机高度 40m，测量 50m 跨度目标。对应 test_complex_scenarios.py TestExtremeValues.test_maximum_distance_50m。",
+        "category": "极值测试",
+        "camera": hd_camera,
+        "pose": c3_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c3_p1.tolist(),
+        "point2_world": c3_p2.tolist(),
+        "point1_pixel": {"x": float(c3_uv[0, 0]), "y": float(c3_uv[0, 1])},
+        "point2_pixel": {"x": float(c3_uv[1, 0]), "y": float(c3_uv[1, 1])},
+        "expected_distance_m": 50.0,
+        "tags": ["极值", "远距", "高空"],
+    })
 
-    s2_p2a = np.array([-5.0, 15.0, 0.0], dtype=np.float64)
-    s2_p2b = np.array([5.0, 15.0, 0.0], dtype=np.float64)
-    s2_uv2 = _project_world_points(np.vstack([s2_p2a, s2_p2b]), s2_camera, s2_pose)
+    # --- Case 4: 近距离 2m (test_complex_scenarios.py: TestExtremeValues.test_minimum_distance_2m) ---
+    c4_center = np.array([0.0, -2.0, 5.0], dtype=np.float64)
+    c4_pose = _look_at_pose(c4_center, np.array([0.0, 5.0, 0.0]))
+    c4_p1 = np.array([-1.0, 5.0, 0.0], dtype=np.float64)
+    c4_p2 = np.array([1.0, 5.0, 0.0], dtype=np.float64)
+    c4_uv = _project_world_points(np.vstack([c4_p1, c4_p2]), hd_camera, c4_pose)
+    cases.append({
+        "id": "short_range_2m",
+        "name": "近距离测量 2m",
+        "description": "相机高度 5m，测量近距离 2m 目标。对应 test_complex_scenarios.py TestExtremeValues.test_minimum_distance_2m。",
+        "category": "极值测试",
+        "camera": hd_camera,
+        "pose": c4_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c4_p1.tolist(),
+        "point2_world": c4_p2.tolist(),
+        "point1_pixel": {"x": float(c4_uv[0, 0]), "y": float(c4_uv[0, 1])},
+        "point2_pixel": {"x": float(c4_uv[1, 0]), "y": float(c4_uv[1, 1])},
+        "expected_distance_m": 2.0,
+        "tags": ["极值", "近距"],
+    })
 
-    scenarios.append({
+    # --- Case 5: 水位变化 +1.5m (test_complex_scenarios.py: TestWaterLevelDynamic) ---
+    c5_center = np.array([0.0, -5.0, 12.0], dtype=np.float64)
+    c5_pose = _look_at_pose(c5_center, np.array([0.0, 30.0, 0.0]))
+    c5_wl = 1.5
+    c5_p1 = np.array([-5.0, 30.0, c5_wl], dtype=np.float64)
+    c5_p2 = np.array([5.0, 30.0, c5_wl], dtype=np.float64)
+    c5_uv = _project_world_points(np.vstack([c5_p1, c5_p2]), hd_camera, c5_pose)
+    cases.append({
+        "id": "water_level_1_5m",
+        "name": "水位上升至 1.5m",
+        "description": "水面从 z=0 上升至 z=1.5m，系统需用正确水位平面解算。对应 test_complex_scenarios.py TestWaterLevelDynamic.test_sudden_water_level_jump。",
+        "category": "水位变化",
+        "camera": hd_camera,
+        "pose": c5_pose,
+        "plane_height_m": c5_wl,
+        "point1_world": c5_p1.tolist(),
+        "point2_world": c5_p2.tolist(),
+        "point1_pixel": {"x": float(c5_uv[0, 0]), "y": float(c5_uv[0, 1])},
+        "point2_pixel": {"x": float(c5_uv[1, 0]), "y": float(c5_uv[1, 1])},
+        "expected_distance_m": 10.0,
+        "tags": ["水位变化", "动态"],
+    })
+
+    # --- Case 6: 像素噪声 ±2px (test_complex_scenarios.py: TestPixelJitterMultiDistance) ---
+    c6_center = np.array([0.0, -10.0, 15.0], dtype=np.float64)
+    c6_pose = _look_at_pose(c6_center, np.array([0.0, 40.0, 0.0]))
+    c6_p1 = np.array([-5.0, 40.0, 0.0], dtype=np.float64)
+    c6_p2 = np.array([5.0, 40.0, 0.0], dtype=np.float64)
+    c6_uv_clean = _project_world_points(np.vstack([c6_p1, c6_p2]), hd_camera, c6_pose)
+    rng6 = np.random.default_rng(42)
+    c6_uv = c6_uv_clean + rng6.normal(0.0, 2.0, size=c6_uv_clean.shape)
+    cases.append({
+        "id": "pixel_noise_10m",
+        "name": "像素噪声 ±2px（10m 基线）",
+        "description": "模拟用户点击误差 ±2px 高斯噪声，距离 10m。对应 test_complex_scenarios.py TestPixelJitterMultiDistance。",
+        "category": "噪声测试",
+        "camera": hd_camera,
+        "pose": c6_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c6_p1.tolist(),
+        "point2_world": c6_p2.tolist(),
+        "point1_pixel": {"x": float(c6_uv[0, 0]), "y": float(c6_uv[0, 1])},
+        "point2_pixel": {"x": float(c6_uv[1, 0]), "y": float(c6_uv[1, 1])},
+        "expected_distance_m": 10.0,
+        "tags": ["噪声", "像素抖动"],
+    })
+
+    # --- Case 7: 姿态扰动（3° 倾斜 + 8cm 偏移）(mirrors test_complex_scenarios.py: TestAttitudeDrift) ---
+    c7_base_center = np.array([0.0, -4.8, 6.4], dtype=np.float64)
+    c7_base_pose = _look_at_pose(c7_base_center, np.array([0.0, 10.0, 0.0]))
+    R_tilt = _euler_deg_to_matrix(3.0, 0.0, 0.0)
+    c7_R = R_tilt @ c7_base_pose.R
+    c7_center = c7_base_center + np.array([0.06, 0.04, 0.032], dtype=np.float64)
+    c7_pose = Pose(R=c7_R, t=-c7_R @ c7_center)
+    c7_p1 = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
+    c7_p2 = np.array([2.5, 10.0, 0.0], dtype=np.float64)
+    c7_uv = _project_world_points(np.vstack([c7_p1, c7_p2]), base_camera, c7_pose)
+    cases.append({
         "id": "attitude_perturb",
-        "name": "姿态扰动 / Attitude Perturbation",
-        "description": "Camera shifted 8cm and tilted 3° to simulate drift. Shows measurement error from pose mismatch.",
-        "camera": s2_camera,
-        "pose": s2_pose,
-        "plane": s2_plane,
-        "water_level_m": 0.0,
-        "meta": {
-            "scenario_type": "attitude_perturbation",
-            "translation_shift_m": 0.08,
-            "tilt_deg": 3.0,
-            "marker_type": "aruco",
-        },
-        "preset_cases": [
-            {
-                "name": "5m baseline (perturbed pose)",
-                "point1": {"x": float(s2_uv1[0, 0]), "y": float(s2_uv1[0, 1])},
-                "point2": {"x": float(s2_uv1[1, 0]), "y": float(s2_uv1[1, 1])},
-                "expected_distance_m": 5.0,
-                "threshold_rel": 0.05,
-            },
-            {
-                "name": "10m baseline (perturbed pose)",
-                "point1": {"x": float(s2_uv2[0, 0]), "y": float(s2_uv2[0, 1])},
-                "point2": {"x": float(s2_uv2[1, 0]), "y": float(s2_uv2[1, 1])},
-                "expected_distance_m": 10.0,
-                "threshold_rel": 0.05,
-            },
-        ],
+        "name": "姿态扰动（3° 倾斜 + 8cm 偏移）",
+        "description": "相机倾斜 3°、平移 8cm，模拟安装漂移。对应 test_complex_scenarios.py TestAttitudeDrift 场景。",
+        "category": "姿态扰动",
+        "camera": base_camera,
+        "pose": c7_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c7_p1.tolist(),
+        "point2_world": c7_p2.tolist(),
+        "point1_pixel": {"x": float(c7_uv[0, 0]), "y": float(c7_uv[0, 1])},
+        "point2_pixel": {"x": float(c7_uv[1, 0]), "y": float(c7_uv[1, 1])},
+        "expected_distance_m": 5.0,
+        "tags": ["姿态扰动", "漂移"],
     })
 
-    # --- Scenario 3: aruco_fallback ---
-    # Slightly different pose simulating post-correction with circle markers
-    s3_center = base_center + np.array([0.01, -0.01, 0.005], dtype=np.float64)
-    s3_pose = _look_at_pose(s3_center, np.array([0.0, 10.0, 0.0], dtype=np.float64))
-    s3_camera = base_camera
-    s3_plane = Plane.from_height(0.0)
-
-    s3_p1a = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
-    s3_p1b = np.array([2.5, 10.0, 0.0], dtype=np.float64)
-    s3_uv1 = _project_world_points(np.vstack([s3_p1a, s3_p1b]), s3_camera, s3_pose)
-
-    s3_p2a = np.array([-5.0, 15.0, 0.0], dtype=np.float64)
-    s3_p2b = np.array([5.0, 15.0, 0.0], dtype=np.float64)
-    s3_uv2 = _project_world_points(np.vstack([s3_p2a, s3_p2b]), s3_camera, s3_pose)
-
-    scenarios.append({
-        "id": "aruco_fallback",
-        "name": "ArUco失败回退圆标 / ArUco Failure + Circle Fallback",
-        "description": "ArUco markers occluded; system falls back to circle markers with slightly lower accuracy.",
-        "camera": s3_camera,
-        "pose": s3_pose,
-        "plane": s3_plane,
-        "water_level_m": 0.0,
-        "meta": {
-            "scenario_type": "marker_fallback",
-            "primary_marker": "aruco",
-            "fallback_marker": "circle",
-            "aruco_status": "occluded",
-            "circle_status": "active",
-        },
-        "preset_cases": [
-            {
-                "name": "5m baseline (circle-corrected pose)",
-                "point1": {"x": float(s3_uv1[0, 0]), "y": float(s3_uv1[0, 1])},
-                "point2": {"x": float(s3_uv1[1, 0]), "y": float(s3_uv1[1, 1])},
-                "expected_distance_m": 5.0,
-                "threshold_rel": 0.05,
-            },
-            {
-                "name": "10m baseline (circle-corrected pose)",
-                "point1": {"x": float(s3_uv2[0, 0]), "y": float(s3_uv2[0, 1])},
-                "point2": {"x": float(s3_uv2[1, 0]), "y": float(s3_uv2[1, 1])},
-                "expected_distance_m": 10.0,
-                "threshold_rel": 0.05,
-            },
-        ],
+    # --- Case 8: 畸变相机（桶形畸变）(test_complex_scenarios.py: TestDistortionAndNoise) ---
+    D_barrel = np.array([-0.08, 0.01, 0.0, 0.0, 0.0], dtype=np.float64)
+    c8_camera = CameraParams(
+        name="distorted_cam",
+        model="pinhole",
+        width=1920,
+        height=1080,
+        K=np.array([[1380.0, 0.0, 960.0], [0.0, 1385.0, 540.0], [0.0, 0.0, 1.0]], dtype=np.float64),
+        D=D_barrel,
+    )
+    c8_center = np.array([0.0, -5.0, 10.0], dtype=np.float64)
+    c8_pose = _look_at_pose(c8_center, np.array([0.0, 30.0, 0.0]))
+    c8_p1 = np.array([-5.0, 30.0, 0.0], dtype=np.float64)
+    c8_p2 = np.array([5.0, 30.0, 0.0], dtype=np.float64)
+    c8_uv = _project_world_points(np.vstack([c8_p1, c8_p2]), c8_camera, c8_pose)
+    cases.append({
+        "id": "barrel_distortion_10m",
+        "name": "桶形畸变相机（10m 基线）",
+        "description": "k1=-0.08 桶形畸变，系统应通过去畸变校正后精度 ≤5%。对应 test_complex_scenarios.py TestDistortionAndNoise.test_measurement_with_barrel_distortion。",
+        "category": "镜头畸变",
+        "camera": c8_camera,
+        "pose": c8_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c8_p1.tolist(),
+        "point2_world": c8_p2.tolist(),
+        "point1_pixel": {"x": float(c8_uv[0, 0]), "y": float(c8_uv[0, 1])},
+        "point2_pixel": {"x": float(c8_uv[1, 0]), "y": float(c8_uv[1, 1])},
+        "expected_distance_m": 10.0,
+        "tags": ["畸变", "镜头校正"],
     })
 
-    # --- Scenario 4: water_level_change ---
-    s4_camera = base_camera
-    s4_pose = base_pose
-    s4_wl = 1.5
-    s4_plane = Plane.from_height(s4_wl)
-
-    s4_p1a = np.array([-2.5, 10.0, s4_wl], dtype=np.float64)
-    s4_p1b = np.array([2.5, 10.0, s4_wl], dtype=np.float64)
-    s4_uv1 = _project_world_points(np.vstack([s4_p1a, s4_p1b]), s4_camera, s4_pose)
-
-    s4_p2a = np.array([-5.0, 15.0, s4_wl], dtype=np.float64)
-    s4_p2b = np.array([5.0, 15.0, s4_wl], dtype=np.float64)
-    s4_uv2 = _project_world_points(np.vstack([s4_p2a, s4_p2b]), s4_camera, s4_pose)
-
-    scenarios.append({
-        "id": "water_level_change",
-        "name": "水位突变 / Water Level Change",
-        "description": "Water level jumps from 0.0m to 1.5m. Points placed on the z=1.5 plane.",
-        "camera": s4_camera,
-        "pose": s4_pose,
-        "plane": s4_plane,
-        "water_level_m": s4_wl,
-        "meta": {
-            "scenario_type": "water_level_change",
-            "water_level_m": 1.5,
-            "previous_level_m": 0.0,
-            "change_type": "sudden_jump",
-        },
-        "preset_cases": [
-            {
-                "name": "5m baseline at z=1.5",
-                "point1": {"x": float(s4_uv1[0, 0]), "y": float(s4_uv1[0, 1])},
-                "point2": {"x": float(s4_uv1[1, 0]), "y": float(s4_uv1[1, 1])},
-                "expected_distance_m": 5.0,
-                "threshold_rel": 0.05,
-            },
-            {
-                "name": "10m baseline at z=1.5",
-                "point1": {"x": float(s4_uv2[0, 0]), "y": float(s4_uv2[0, 1])},
-                "point2": {"x": float(s4_uv2[1, 0]), "y": float(s4_uv2[1, 1])},
-                "expected_distance_m": 10.0,
-                "threshold_rel": 0.05,
-            },
-        ],
-    })
-
-    # --- Scenario 5: pixel_noise ---
-    s5_camera = base_camera
-    s5_pose = base_pose
-    s5_plane = Plane.from_height(0.0)
-
-    s5_p1a = np.array([-2.5, 10.0, 0.0], dtype=np.float64)
-    s5_p1b = np.array([2.5, 10.0, 0.0], dtype=np.float64)
-    s5_uv1_clean = _project_world_points(np.vstack([s5_p1a, s5_p1b]), s5_camera, s5_pose)
-    # Apply fixed ±2px jitter (deterministic seed for reproducibility)
-    rng = np.random.default_rng(42)
-    s5_noise1 = rng.normal(0.0, 2.0, size=(2, 2))
-    s5_uv1 = s5_uv1_clean + s5_noise1
-
-    s5_p2a = np.array([-5.0, 15.0, 0.0], dtype=np.float64)
-    s5_p2b = np.array([5.0, 15.0, 0.0], dtype=np.float64)
-    s5_uv2_clean = _project_world_points(np.vstack([s5_p2a, s5_p2b]), s5_camera, s5_pose)
-    s5_noise2 = rng.normal(0.0, 2.0, size=(2, 2))
-    s5_uv2 = s5_uv2_clean + s5_noise2
-
-    scenarios.append({
-        "id": "pixel_noise",
-        "name": "像素噪声/抖动 / Pixel Noise/Jitter",
-        "description": "Standard setup with ±2px Gaussian noise on clicked points, simulating user click imprecision.",
-        "camera": s5_camera,
-        "pose": s5_pose,
-        "plane": s5_plane,
-        "water_level_m": 0.0,
-        "meta": {
-            "scenario_type": "pixel_noise",
-            "noise_std_px": 2.0,
-            "noise_type": "gaussian",
-        },
-        "preset_cases": [
-            {
-                "name": "5m baseline with ±2px noise",
-                "point1": {"x": float(s5_uv1[0, 0]), "y": float(s5_uv1[0, 1])},
-                "point2": {"x": float(s5_uv1[1, 0]), "y": float(s5_uv1[1, 1])},
-                "expected_distance_m": 5.0,
-                "threshold_rel": 0.05,
-            },
-            {
-                "name": "10m baseline with ±2px noise",
-                "point1": {"x": float(s5_uv2[0, 0]), "y": float(s5_uv2[0, 1])},
-                "point2": {"x": float(s5_uv2[1, 0]), "y": float(s5_uv2[1, 1])},
-                "expected_distance_m": 10.0,
-                "threshold_rel": 0.05,
-            },
-        ],
-    })
-
-    # --- Scenario 6: degenerate_geometry ---
-    s6_camera = base_camera
-    s6_cam_center = np.array([0.0, 0.0, 0.5], dtype=np.float64)
-    s6_target = np.array([0.0, 200.0, 0.3], dtype=np.float64)
-    s6_pose = _look_at_pose(s6_cam_center, s6_target)
-    s6_plane = Plane.from_height(0.0)
-
-    # Near-horizon pixels — rays nearly parallel to plane
-    s6_px1 = {"x": float(s6_camera.width // 2 - 100), "y": 10.0}
-    s6_px2 = {"x": float(s6_camera.width // 2 + 100), "y": 10.0}
-
-    scenarios.append({
+    # --- Case 9: 退化几何（近水平射线）(test_complex_scenarios.py: TestDegenerateGeometry) ---
+    c9_camera = base_camera
+    c9_center = np.array([0.0, 0.0, 0.5], dtype=np.float64)
+    c9_target = np.array([0.0, 200.0, 0.3], dtype=np.float64)
+    c9_pose = _look_at_pose(c9_center, c9_target)
+    # Near-horizon pixels
+    c9_px1 = {"x": float(c9_camera.width // 2 - 100), "y": 10.0}
+    c9_px2 = {"x": float(c9_camera.width // 2 + 100), "y": 10.0}
+    # Approximate world points for display (not measurable accurately)
+    c9_p1 = np.array([-1.0, 50.0, 0.0], dtype=np.float64)
+    c9_p2 = np.array([1.0, 50.0, 0.0], dtype=np.float64)
+    cases.append({
         "id": "degenerate_geometry",
-        "name": "退化几何 / Degenerate Geometry",
-        "description": "Camera at z=0.5m looking nearly horizontally. Rays nearly parallel to water — measurement expected to fail or have very low confidence.",
-        "camera": s6_camera,
-        "pose": s6_pose,
-        "plane": s6_plane,
-        "water_level_m": 0.0,
-        "meta": {
-            "scenario_type": "degenerate_geometry",
-            "camera_height_m": 0.5,
-            "grazing_angle_deg": "~2",
-            "failure_reason": "ray_nearly_parallel_to_plane",
-        },
-        "preset_cases": [
-            {
-                "name": "near-horizon points (expect failure/low confidence)",
-                "point1": s6_px1,
-                "point2": s6_px2,
-                "expected_distance_m": None,
-                "threshold_rel": 0.05,
-            },
-        ],
+        "name": "退化几何（近水平射线）",
+        "description": "相机高度 0.5m 近乎水平观测，射线几乎平行于水面，预期测量失败或置信度极低。对应 TestDegenerateGeometry。",
+        "category": "退化场景",
+        "camera": c9_camera,
+        "pose": c9_pose,
+        "plane_height_m": 0.0,
+        "point1_world": c9_p1.tolist(),
+        "point2_world": c9_p2.tolist(),
+        "point1_pixel": c9_px1,
+        "point2_pixel": c9_px2,
+        "expected_distance_m": None,
+        "tags": ["退化", "低置信度", "预期失败"],
     })
 
-    return scenarios
+    return cases
 
 
-_SCENARIOS = _build_scenarios()
-_SCENARIO_MAP: Dict[str, Dict[str, Any]] = {s["id"]: s for s in _SCENARIOS}
-
-_DEGENERATE_CONFIDENCE_THRESHOLD = 0.3
+_TEST_CASES = _build_test_cases()
+_TEST_CASE_MAP: Dict[str, Dict[str, Any]] = {tc["id"]: tc for tc in _TEST_CASES}
 
 
 # ---------------------------------------------------------------------------
@@ -426,15 +372,14 @@ _DEGENERATE_CONFIDENCE_THRESHOLD = 0.3
 # ---------------------------------------------------------------------------
 
 class PixelPoint(BaseModel):
-    x: float = Field(..., description="Pixel x coordinate")
-    y: float = Field(..., description="Pixel y coordinate")
+    x: float = Field(..., description="像素 x 坐标")
+    y: float = Field(..., description="像素 y 坐标")
 
 
 class MeasureRequest(BaseModel):
     point1: PixelPoint
     point2: PixelPoint
-    water_level_m: Optional[float] = Field(None, description="Override water level (m)")
-    scenario_id: Optional[str] = Field(None, description="Use a predefined scenario's camera/pose/plane")
+    water_level_m: Optional[float] = Field(None, description="水位覆盖（米）")
 
 
 class MeasureResponse(BaseModel):
@@ -444,6 +389,12 @@ class MeasureResponse(BaseModel):
     elapsed_ms: float
     message: str
     diagnostics: Dict[str, Any]
+    # 3D 可视化坐标
+    camera_center_world: Optional[List[float]] = None
+    camera_pose_R: Optional[List[List[float]]] = None
+    point1_world: Optional[List[float]] = None
+    point2_world: Optional[List[float]] = None
+    water_level_m: Optional[float] = None
 
 
 class HealthResponse(BaseModel):
@@ -459,33 +410,35 @@ class ConfigResponse(BaseModel):
     image_height: int
 
 
-class ScenarioSummary(BaseModel):
+class PoseData(BaseModel):
+    R: List[List[float]]
+    t: List[float]
+    camera_center_world: List[float]
+
+
+class TestCaseScene(BaseModel):
     id: str
     name: str
     description: str
-    meta: Dict[str, Any]
-
-
-class PresetCaseResult(BaseModel):
-    name: str
-    point1: Dict[str, float]
-    point2: Dict[str, float]
+    category: str
+    camera: Dict[str, Any]
+    pose: PoseData
+    plane_height_m: float
+    point1_world: List[float]
+    point2_world: List[float]
+    point1_pixel: Dict[str, float]
+    point2_pixel: Dict[str, float]
     expected_distance_m: Optional[float]
-    measured_distance_m: Optional[float]
+    tags: List[str]
+
+
+class TestCaseRunResponse(BaseModel):
+    id: str
+    name: str
+    measure_result: MeasureResponse
+    expected_distance_m: Optional[float]
     relative_error: Optional[float]
-    threshold_rel: float
-    passed: bool
-    success: bool
-    confidence: float
-    message: str
-
-
-class ScenarioRunResponse(BaseModel):
-    scenario_id: str
-    scenario_name: str
-    overall_pass: bool
-    cases: List[PresetCaseResult]
-    meta: Dict[str, Any]
+    passed: Optional[bool]
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +447,7 @@ class ScenarioRunResponse(BaseModel):
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    return HealthResponse(status="ok", version="1.0.0")
+    return HealthResponse(status="ok", version="2.0.0")
 
 
 @app.get("/config", response_model=ConfigResponse)
@@ -510,21 +463,9 @@ def config():
 
 @app.post("/measure", response_model=MeasureResponse)
 def measure(req: MeasureRequest):
-    # Resolve scenario overrides
     camera = _DEFAULT_CAMERA
     pose = _DEFAULT_POSE
     water_level = req.water_level_m if req.water_level_m is not None else _DEFAULT_WATER_LEVEL
-    scenario_meta: Optional[Dict[str, Any]] = None
-
-    if req.scenario_id is not None:
-        scenario = _SCENARIO_MAP.get(req.scenario_id)
-        if scenario is None:
-            raise HTTPException(status_code=404, detail=f"Scenario '{req.scenario_id}' not found")
-        camera = scenario["camera"]
-        pose = scenario["pose"]
-        water_level = req.water_level_m if req.water_level_m is not None else scenario["water_level_m"]
-        scenario_meta = scenario["meta"]
-
     plane = Plane.from_height(water_level)
 
     pixel_a = (req.point1.x, req.point1.y)
@@ -539,9 +480,9 @@ def measure(req: MeasureRequest):
         extrinsics_score=1.0,
     )
 
-    diagnostics = dict(result.diagnostics)
-    if scenario_meta is not None:
-        diagnostics["scenario_meta"] = scenario_meta
+    cam_center = pose.camera_center_world()
+    p1_world = result.point1_world.tolist() if result.point1_world is not None else None
+    p2_world = result.point2_world.tolist() if result.point2_world is not None else None
 
     return MeasureResponse(
         success=result.success,
@@ -549,85 +490,102 @@ def measure(req: MeasureRequest):
         confidence=result.confidence,
         elapsed_ms=result.elapsed_ms,
         message=result.message,
-        diagnostics=diagnostics,
+        diagnostics=dict(result.diagnostics),
+        camera_center_world=cam_center.tolist(),
+        camera_pose_R=pose.R.tolist(),
+        point1_world=p1_world,
+        point2_world=p2_world,
+        water_level_m=water_level,
     )
 
 
-@app.get("/scenarios", response_model=List[ScenarioSummary])
-def list_scenarios():
-    return [
-        ScenarioSummary(
-            id=s["id"],
-            name=s["name"],
-            description=s["description"],
-            meta=s["meta"],
-        )
-        for s in _SCENARIOS
-    ]
-
-
-@app.post("/scenarios/{scenario_id}/run", response_model=ScenarioRunResponse)
-def run_scenario(scenario_id: str):
-    scenario = _SCENARIO_MAP.get(scenario_id)
-    if scenario is None:
-        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found")
-
-    camera = scenario["camera"]
-    pose = scenario["pose"]
-    plane = scenario["plane"]
-    cases_results: List[PresetCaseResult] = []
-    all_pass = True
-
-    for case in scenario["preset_cases"]:
-        pixel_a = (case["point1"]["x"], case["point1"]["y"])
-        pixel_b = (case["point2"]["x"], case["point2"]["y"])
-
-        result = measure_distance_between_pixels(
-            pixel_a_uv=pixel_a,
-            pixel_b_uv=pixel_b,
-            camera=camera,
-            pose_w2c=pose,
-            plane=plane,
-            extrinsics_score=1.0,
-        )
-
-        expected = case["expected_distance_m"]
-        threshold = case["threshold_rel"]
-
-        if expected is None:
-            # Degenerate case: pass if system reports failure or very low confidence.
-            passed = (not result.success) or (result.confidence < _DEGENERATE_CONFIDENCE_THRESHOLD)
-            rel_error = None
-        elif result.success and result.distance_m is not None:
-            rel_error = abs(result.distance_m - expected) / expected if expected > 0 else 0.0
-            passed = rel_error <= threshold
-        else:
-            rel_error = None
-            passed = False
-
-        if not passed:
-            all_pass = False
-
-        cases_results.append(PresetCaseResult(
-            name=case["name"],
-            point1=case["point1"],
-            point2=case["point2"],
-            expected_distance_m=expected,
-            measured_distance_m=result.distance_m,
-            relative_error=rel_error,
-            threshold_rel=threshold,
-            passed=passed,
-            success=result.success,
-            confidence=result.confidence,
-            message=result.message,
+@app.get("/test_cases", response_model=List[TestCaseScene])
+def list_test_cases():
+    result = []
+    for tc in _TEST_CASES:
+        cam: CameraParams = tc["camera"]
+        pose: Pose = tc["pose"]
+        center_w = pose.camera_center_world()
+        result.append(TestCaseScene(
+            id=tc["id"],
+            name=tc["name"],
+            description=tc["description"],
+            category=tc["category"],
+            camera=cam.to_dict(),
+            pose=PoseData(
+                R=pose.R.tolist(),
+                t=pose.t.tolist(),
+                camera_center_world=center_w.tolist(),
+            ),
+            plane_height_m=tc["plane_height_m"],
+            point1_world=tc["point1_world"],
+            point2_world=tc["point2_world"],
+            point1_pixel=tc["point1_pixel"],
+            point2_pixel=tc["point2_pixel"],
+            expected_distance_m=tc["expected_distance_m"],
+            tags=tc["tags"],
         ))
+    return result
 
-    return ScenarioRunResponse(
-        scenario_id=scenario_id,
-        scenario_name=scenario["name"],
-        overall_pass=all_pass,
-        cases=cases_results,
-        meta=scenario["meta"],
+
+@app.post("/test_cases/{case_id}/run", response_model=TestCaseRunResponse)
+def run_test_case(case_id: str):
+    tc = _TEST_CASE_MAP.get(case_id)
+    if tc is None:
+        raise HTTPException(status_code=404, detail=f"测试用例 '{case_id}' 不存在")
+
+    camera: CameraParams = tc["camera"]
+    pose: Pose = tc["pose"]
+    water_level: float = tc["plane_height_m"]
+    plane = Plane.from_height(water_level)
+
+    pixel_a = (tc["point1_pixel"]["x"], tc["point1_pixel"]["y"])
+    pixel_b = (tc["point2_pixel"]["x"], tc["point2_pixel"]["y"])
+
+    result = measure_distance_between_pixels(
+        pixel_a_uv=pixel_a,
+        pixel_b_uv=pixel_b,
+        camera=camera,
+        pose_w2c=pose,
+        plane=plane,
+        extrinsics_score=1.0,
+    )
+
+    cam_center = pose.camera_center_world()
+    p1_world = result.point1_world.tolist() if result.point1_world is not None else None
+    p2_world = result.point2_world.tolist() if result.point2_world is not None else None
+
+    measure_resp = MeasureResponse(
+        success=result.success,
+        distance_m=result.distance_m,
+        confidence=result.confidence,
+        elapsed_ms=result.elapsed_ms,
+        message=result.message,
+        diagnostics=dict(result.diagnostics),
+        camera_center_world=cam_center.tolist(),
+        camera_pose_R=pose.R.tolist(),
+        point1_world=p1_world,
+        point2_world=p2_world,
+        water_level_m=water_level,
+    )
+
+    expected = tc["expected_distance_m"]
+    rel_error: Optional[float] = None
+    passed: Optional[bool] = None
+    if expected is not None and result.success and result.distance_m is not None and expected > 0:
+        rel_error = abs(result.distance_m - expected) / expected
+        passed = rel_error <= 0.05
+    elif expected is None:
+        # Degenerate case: pass if system fails or reports low confidence
+        passed = (not result.success) or (result.confidence < 0.3)
+
+    return TestCaseRunResponse(
+        id=tc["id"],
+        name=tc["name"],
+        measure_result=measure_resp,
+        expected_distance_m=expected,
+        relative_error=rel_error,
+        passed=passed,
     )
 
 
@@ -642,4 +600,4 @@ def index():
     index_path = _static_dir / "index.html"
     if index_path.exists():
         return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Water Measurement Demo</h1><p>Frontend not found.</p>")
+    return HTMLResponse(content="<h1>水面测距系统演示</h1><p>前端未找到。</p>")
