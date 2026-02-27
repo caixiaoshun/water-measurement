@@ -39,6 +39,23 @@
   .water-input input { width: 80px; padding: 6px; border-radius: 4px; border: 1px solid #334;
                        background: #1a1a2e; color: #eee; font-size: 0.85rem; }
   .water-input label { font-size: 0.85rem; }
+  .scenario-select { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #334;
+                     background: #1a1a2e; color: #eee; font-size: 0.85rem; margin-bottom: 8px; }
+  .scenario-results { margin-top: 10px; }
+  .case-result { display: flex; justify-content: space-between; align-items: center;
+                 font-size: 0.8rem; padding: 6px 8px; border-radius: 4px;
+                 margin-bottom: 4px; background: #1a1a2e; }
+  .case-pass { color: #45e9a0; border-left: 3px solid #45e9a0; }
+  .case-fail { color: #e94560; border-left: 3px solid #e94560; }
+  .overall-badge { display: inline-block; padding: 3px 12px; border-radius: 12px;
+                   font-size: 0.78rem; font-weight: 700; margin-bottom: 8px; }
+  .overall-badge.pass { background: #45e9a0; color: #1a1a2e; }
+  .overall-badge.fail { background: #e94560; color: #fff; }
+  #scenario-desc { font-size: 0.8rem; color: #8899bb; margin-bottom: 8px; line-height: 1.4; }
+  #scenario-results { max-height: 300px; overflow-y: auto; }
+  #btn-run-scenario { display: none; margin-top: 6px; }
+  .scenario-meta-section { margin-top: 8px; border-top: 1px solid #1a2a4a; padding-top: 6px; }
+  .scenario-meta-section .info-row span:first-child { color: #a8b8d8; }
 </style>
 </head>
 <body>
@@ -55,6 +72,16 @@
 
   <div class="sidebar">
     <div class="card">
+      <h3>场景选择 / Scenario</h3>
+      <select id="scenario-select" class="scenario-select">
+        <option value="">默认场景 / Default</option>
+      </select>
+      <div id="scenario-desc"></div>
+      <button id="btn-run-scenario">一键运行 / Run Preset</button>
+      <div id="scenario-results" class="scenario-results"></div>
+    </div>
+
+    <div class="card">
       <h3>测距结果 / Distance</h3>
       <div class="value" id="dist-value">—</div>
       <div class="meta" id="dist-meta"></div>
@@ -68,6 +95,7 @@
         <div class="info-row"><span>Grazing</span><span id="d-graz">—</span></div>
         <div class="info-row"><span>Status</span><span id="d-stat">—</span></div>
       </div>
+      <div id="diag-scenario-meta" class="scenario-meta-section" style="display:none;"></div>
     </div>
 
     <div class="card">
@@ -239,14 +267,18 @@ async function doMeasure() {
   document.getElementById('status-line').textContent = '测量中...';
 
   try {
+    const body = {
+      point1: { x: points[0].x, y: points[0].y },
+      point2: { x: points[1].x, y: points[1].y },
+      water_level_m: wl,
+    };
+    if (currentScenarioId) {
+      body.scenario_id = currentScenarioId;
+    }
     const resp = await fetch('/measure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        point1: { x: points[0].x, y: points[0].y },
-        point2: { x: points[1].x, y: points[1].y },
-        water_level_m: wl,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json();
 
@@ -275,6 +307,9 @@ async function doMeasure() {
     const graz = diag.grazing;
     document.getElementById('d-graz').textContent = graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
     document.getElementById('d-stat').textContent = data.message;
+    if (diag.scenario_meta) {
+      showScenarioMeta(diag.scenario_meta);
+    }
     document.getElementById('status-line').textContent = '测距完成，点击"清除"或继续点选';
   } catch (err) {
     document.getElementById('status-line').textContent = '请求失败: ' + err.message;
@@ -296,7 +331,149 @@ async function checkHealth() {
   }
 }
 
+// --- Scenario Selection & One-Click Run ---
+let currentScenarioId = '';
+let scenariosCache = [];
+
+async function loadScenarios() {
+  try {
+    const resp = await fetch('/scenarios');
+    const scenarios = await resp.json();
+    scenariosCache = scenarios;
+    const sel = document.getElementById('scenario-select');
+    scenarios.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.warn('Failed to load scenarios:', e);
+  }
+}
+
+document.getElementById('scenario-select').addEventListener('change', function() {
+  currentScenarioId = this.value;
+  const descEl = document.getElementById('scenario-desc');
+  const btnRun = document.getElementById('btn-run-scenario');
+  const resultsEl = document.getElementById('scenario-results');
+  resultsEl.innerHTML = '';
+
+  if (currentScenarioId) {
+    const sc = scenariosCache.find(s => s.id === currentScenarioId);
+    descEl.textContent = sc ? sc.description : '';
+    btnRun.style.display = 'block';
+  } else {
+    descEl.textContent = '';
+    btnRun.style.display = 'none';
+  }
+});
+
+document.getElementById('btn-run-scenario').addEventListener('click', async function() {
+  if (!currentScenarioId) return;
+  const resultsEl = document.getElementById('scenario-results');
+  resultsEl.innerHTML = '<div style="color:#8899bb;font-size:0.8rem;">运行中...</div>';
+
+  try {
+    const resp = await fetch('/scenarios/' + encodeURIComponent(currentScenarioId) + '/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+    let html = '';
+
+    // Overall badge
+    const passClass = data.overall_pass ? 'pass' : 'fail';
+    const passText = data.overall_pass ? 'PASS' : 'FAIL';
+    html += '<span class="overall-badge ' + passClass + '">' + passText + '</span>';
+
+    // Display scenario meta in diagnostics
+    if (data.meta) {
+      showScenarioMeta(data.meta);
+    }
+
+    // Case results
+    if (data.cases && data.cases.length) {
+      data.cases.forEach(c => {
+        const cls = c.passed ? 'case-pass' : 'case-fail';
+        const badge = c.passed ? '✓' : '✗';
+        const measured = c.measured_distance_m != null ? c.measured_distance_m.toFixed(3) : '—';
+        const expected = c.expected_distance_m != null ? c.expected_distance_m.toFixed(3) : '—';
+        const error = c.relative_error != null ? (c.relative_error * 100).toFixed(1) + '%' : '—';
+        html += '<div class="case-result ' + cls + '">'
+          + '<span>' + badge + ' ' + (c.name || '') + '</span>'
+          + '<span>' + measured + ' / ' + expected + ' m (' + error + ')</span>'
+          + '</div>';
+      });
+
+      // Draw preset points and lines on canvas
+      drawPresetCases(data.cases);
+    }
+    resultsEl.innerHTML = html;
+  } catch (err) {
+    resultsEl.innerHTML = '<div style="color:#e94560;font-size:0.8rem;">运行失败: ' + err.message + '</div>';
+  }
+});
+
+function drawPresetCases(cases) {
+  draw();
+  cases.forEach((c, i) => {
+    if (!c.point1 || !c.point2) return;
+    const p1 = c.point1;
+    const p2 = c.point2;
+    const color = c.passed ? '#45e9a0' : '#e94560';
+
+    // Draw points
+    [p1, p2].forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+
+    // Draw line
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    const mx = (p1.x + p2.x) / 2;
+    const my = (p1.y + p2.y) / 2;
+    const measured = c.measured_distance_m != null ? c.measured_distance_m.toFixed(2) + 'm' : '—';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(mx - 30, my - 14 + i * 16, 60, 16);
+    ctx.fillStyle = color;
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(measured, mx, my - 2 + i * 16);
+    ctx.textAlign = 'start';
+  });
+}
+
+function showScenarioMeta(meta) {
+  const el = document.getElementById('diag-scenario-meta');
+  if (!meta || Object.keys(meta).length === 0) {
+    el.style.display = 'none';
+    return;
+  }
+  let html = '<div style="font-size:0.78rem;color:#a8b8d8;margin-bottom:4px;">Scenario Meta</div>';
+  Object.entries(meta).forEach(([k, v]) => {
+    html += '<div class="info-row"><span>' + k + '</span><span>' + v + '</span></div>';
+  });
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
 draw();
+loadScenarios();
 checkHealth();
 setInterval(checkHealth, 10000);
 </script>
