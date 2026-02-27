@@ -468,6 +468,10 @@ function updateScene(data, distM) {
   scene.add(cameraGroup);
 
   // Measurement rays & labels
+  // Explicitly remove old CSS2D label DOM elements before replacing the group
+  measureGroup.traverse(obj => {
+    if (obj.isCSS2DObject && obj.element.parentNode) obj.element.remove();
+  });
   scene.remove(measureGroup);
   measureGroup = new THREE.Group();
   if (data.point1_world && data.point2_world && data.camera_center_world) {
@@ -494,6 +498,9 @@ function updateScene(data, distM) {
 // ── Reset to default scene ─────────────────────────────────────────────────
 function resetScene() {
   waterMesh.position.y = 0;
+  measureGroup.traverse(obj => {
+    if (obj.isCSS2DObject && obj.element.parentNode) obj.element.remove();
+  });
   scene.remove(cameraGroup, measureGroup);
   cameraGroup  = new THREE.Group();
   measureGroup = new THREE.Group();
