@@ -408,6 +408,7 @@ class ConfigResponse(BaseModel):
     plane: Dict[str, Any]
     image_width: int
     image_height: int
+    pose: PoseData
 
 
 class PoseData(BaseModel):
@@ -452,12 +453,18 @@ def health():
 
 @app.get("/config", response_model=ConfigResponse)
 def config():
+    cam_center = _DEFAULT_POSE.camera_center_world()
     return ConfigResponse(
         camera=_DEFAULT_CAMERA.to_dict(),
         water_level_m=_DEFAULT_WATER_LEVEL,
         plane=_DEFAULT_PLANE.to_dict(),
         image_width=_DEFAULT_CAMERA.width,
         image_height=_DEFAULT_CAMERA.height,
+        pose=PoseData(
+            R=_DEFAULT_POSE.R.tolist(),
+            t=_DEFAULT_POSE.t.tolist(),
+            camera_center_world=cam_center.tolist(),
+        ),
     )
 
 
