@@ -1,0 +1,60 @@
+﻿camera:
+  name: demo_cam
+  model: pinhole
+  width: 1280
+  height: 720
+  K:
+    - [920.0, 0.0, 640.0]
+    - [0.0, 920.0, 360.0]
+    - [0.0, 0.0, 1.0]
+  D: [0.0, 0.0, 0.0, 0.0, 0.0]
+  # 可替换为外部文件
+  # params_file: configs/camera_examples/hikvision.yaml
+
+input:
+  source: "0"  # 相机ID / 视频文件路径 / 图片序列目录
+
+marker:
+  type: aruco
+  dictionary: DICT_4X4_50
+  grid_rows: 2
+  grid_cols: 3
+  marker_length_m: 0.18
+  marker_separation_m: 0.04
+  origin_xyz: [0.0, 0.0, 0.0]
+  first_marker_id: 0
+
+water_plane:
+  type: height
+  height_m: 0.0
+
+water_level:
+  type: static
+  height_m: 0.0
+  # type: file
+  # path: water_level_mock.csv
+  # hold_last: true
+  # time_offset_sec: 0.0
+
+extrinsics:
+  ransac_reprojection_error_px: 4.0
+  ransac_confidence: 0.995
+  ransac_iterations: 200
+  min_inliers: 6
+  min_inlier_ratio: 0.5
+  max_reprojection_error_px: 6.0
+  smoothing_alpha: 0.35
+  max_rotation_jump_deg: 20.0
+  max_translation_jump_m: 2.0
+
+runtime:
+  display_wait_ms: 1
+  parallel_threshold: 1.0e-8
+  clear_points_after_measure: true
+
+output:
+  save_annotated_dir: outputs/annotated
+
+logging:
+  level: INFO
+  file: logs/demo.log
