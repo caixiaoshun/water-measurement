@@ -250,7 +250,7 @@ async function doMeasure() {
     });
     const data = await resp.json();
 
-    if (data.success && data.distance_m != null) {
+    if (data.success && data.distance_m !== null && data.distance_m !== undefined) {
       document.getElementById('dist-value').textContent = data.distance_m.toFixed(3) + ' m';
       document.getElementById('dist-meta').textContent = data.message;
 
