@@ -186,8 +186,7 @@ def _build_scenarios() -> List[Dict[str, Any]]:
     R_tilt = _euler_deg_to_matrix(3.0, 0.0, 0.0)  # 3° tilt around x-axis
     perturbed_R = R_tilt @ base_pose.R
     base_center = base_pose.camera_center_world()
-    # 8cm shift: direction chosen so norm ≈ 0.08
-    shift = np.array([0.06, 0.04, 0.03], dtype=np.float64)  # norm ≈ 0.078
+    shift = np.array([0.06, 0.04, 0.032], dtype=np.float64)  # norm ≈ 0.08 m
     perturbed_center = base_center + shift
     s2_pose = Pose(R=perturbed_R, t=-perturbed_R @ perturbed_center)
     s2_camera = base_camera
@@ -419,6 +418,8 @@ def _build_scenarios() -> List[Dict[str, Any]]:
 _SCENARIOS = _build_scenarios()
 _SCENARIO_MAP: Dict[str, Dict[str, Any]] = {s["id"]: s for s in _SCENARIOS}
 
+_DEGENERATE_CONFIDENCE_THRESHOLD = 0.3
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -595,8 +596,7 @@ def run_scenario(scenario_id: str):
 
         if expected is None:
             # Degenerate case: pass if system reports failure or very low confidence.
-            # 0.3 chosen as threshold — grazing rays yield near-zero geometric scores.
-            passed = (not result.success) or (result.confidence < 0.3)
+            passed = (not result.success) or (result.confidence < _DEGENERATE_CONFIDENCE_THRESHOLD)
             rel_error = None
         elif result.success and result.distance_m is not None:
             rel_error = abs(result.distance_m - expected) / expected if expected > 0 else 0.0
