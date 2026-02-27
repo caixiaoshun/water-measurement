@@ -40,6 +40,7 @@ python -m pytest -v
 - **tests/test_basic.py** — 基础单元测试（去畸变、射线求交、距离计算、PnP 回归）
 - **tests/test_contract_metrics.py** — 合同 7 条验收指标对应的自动化测试
 - **tests/test_complex_scenarios.py** — 扩展复杂场景测试（像素抖动、水位变化、姿态漂移、标记退化、退化几何、畸变噪声、极值边界）
+- **tests/test_enhanced_scenarios.py** — 增强场景测试（Monte Carlo N=200、多畸变、多恢复场景）
 
 所有测试通过断言控制，不满足阈值则测试失败。
 
@@ -82,22 +83,28 @@ uvicorn web.app:app --host 0.0.0.0 --port 8765
 ## 目录结构
 
 ```
-├── vision_ranging.py        # 核心视觉算法（相机参数、基准点检测、PnP外参、测距）
-├── water_level.py           # 水位输入适配（静态值/文件回放/融合）
-├── main.py                  # CLI 入口（配置读取、视频流、鼠标点选、结果输出）
-├── config.yaml              # 默认配置文件
-├── requirements.txt         # Python 依赖
-├── pytest.ini               # pytest 配置
-├── TECH_REPORT.md           # 技术报告（合同验收版）
-├── README.md                # 本文件
+├── src/                         # 核心源代码（与根目录保持同步）
+│   ├── vision_ranging.py        # 视觉算法（相机参数、基准点检测、PnP外参、测距）
+│   ├── water_level.py           # 水位输入适配（静态值/文件回放/融合）
+│   └── main.py                  # CLI 入口（配置读取、视频流、鼠标点选、结果输出）
+├── vision_ranging.py            # 核心视觉算法（兼容根目录导入）
+├── water_level.py               # 水位管理（兼容根目录导入）
+├── main.py                      # CLI 入口（兼容根目录导入）
+├── config.yaml                  # 默认配置文件
+├── requirements.txt             # Python 依赖
+├── pytest.ini                   # pytest 配置
+├── docs/
+│   └── TECH_REPORT.md           # 技术报告（合同验收版）
+├── README.md                    # 本文件
 ├── tests/
-│   ├── test_basic.py                # 基础单元测试
-│   ├── test_contract_metrics.py     # 合同 7 条指标测试
-│   └── test_complex_scenarios.py    # 扩展复杂场景测试
+│   ├── test_basic.py                  # 基础单元测试
+│   ├── test_contract_metrics.py       # 合同 7 条指标测试
+│   ├── test_complex_scenarios.py      # 扩展复杂场景测试
+│   └── test_enhanced_scenarios.py     # 增强场景测试（抖动/水位/退化/畸变等）
 └── web/
-    ├── app.py               # FastAPI 后端
+    ├── app.py                   # FastAPI 后端
     └── static/
-        └── index.html       # 前端页面（点选测距 + 诊断面板）
+        └── index.html           # 前端页面（点选测距 + 诊断面板）
 ```
 
 ## 配置说明（config.yaml）

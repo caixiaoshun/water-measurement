@@ -20,10 +20,12 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-# Ensure project root is importable
+# Ensure project root and src/ are importable
 _project_root = str(Path(__file__).resolve().parents[1])
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
+_src_dir = str(Path(__file__).resolve().parents[1] / "src")
+for _p in [_project_root, _src_dir]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from vision_ranging import (  # noqa: E402
     CameraParams,
