@@ -3,479 +3,432 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Water Measurement Demo</title>
+<title>水面视觉测距系统 3D 演示</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         background: #1a1a2e; color: #eee; display: flex; flex-direction: column;
-         min-height: 100vh; }
-  header { background: #16213e; padding: 14px 24px; display: flex;
-           align-items: center; gap: 12px; }
-  header h1 { font-size: 1.25rem; font-weight: 600; }
-  header .badge { background: #0f3460; padding: 3px 10px; border-radius: 12px;
-                  font-size: 0.75rem; }
-  .main { display: flex; flex: 1; gap: 0; }
-  .canvas-area { flex: 1; position: relative; display: flex;
-                 align-items: center; justify-content: center; padding: 16px; }
-  canvas { border: 2px solid #334; cursor: crosshair; background: #222;
-           max-width: 100%; }
-  .sidebar { width: 340px; background: #16213e; padding: 20px;
-             overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
-  .card { background: #0f3460; border-radius: 8px; padding: 14px; }
-  .card h3 { font-size: 0.9rem; margin-bottom: 8px; color: #a8b8d8; }
-  .card .value { font-size: 1.6rem; font-weight: 700; color: #e94560; }
-  .card .meta { font-size: 0.78rem; color: #8899bb; margin-top: 6px; }
-  .info-row { display: flex; justify-content: space-between; font-size: 0.82rem;
-              padding: 3px 0; border-bottom: 1px solid #1a2a4a; }
+         background: #0d1117; color: #e6edf3; display: flex; flex-direction: column;
+         min-height: 100vh; overflow: hidden; }
+  header { background: #161b22; padding: 12px 20px; display: flex;
+           align-items: center; gap: 12px; border-bottom: 1px solid #30363d; flex-shrink: 0; }
+  header h1 { font-size: 1.1rem; font-weight: 600; color: #58a6ff; }
+  header .badge { background: #1f6feb; padding: 2px 10px; border-radius: 12px;
+                  font-size: 0.72rem; color: #cae8ff; }
+  header .health { font-size: 0.75rem; padding: 2px 10px; border-radius: 12px;
+                   background: #1c2128; color: #8b949e; transition: all 0.3s; }
+  .main { display: flex; flex: 1; overflow: hidden; height: calc(100vh - 49px); }
+  #canvas-container { flex: 1; position: relative; background: #0d1117; overflow: hidden; }
+  #three-canvas { width: 100%; height: 100%; display: block; }
+  .canvas-hint { position: absolute; bottom: 12px; left: 12px; font-size: 0.72rem;
+                 color: rgba(139,148,158,0.8); pointer-events: none;
+                 background: rgba(13,17,23,0.7); padding: 4px 10px; border-radius: 6px; }
+  .sidebar { width: 320px; background: #161b22; border-left: 1px solid #30363d;
+             overflow-y: auto; display: flex; flex-direction: column; gap: 0; flex-shrink: 0; }
+  .card { background: #0d1117; border-bottom: 1px solid #21262d; padding: 14px 16px; }
+  .card h3 { font-size: 0.78rem; font-weight: 600; color: #8b949e; text-transform: uppercase;
+             letter-spacing: 0.06em; margin-bottom: 10px; }
+  .dist-value { font-size: 2rem; font-weight: 700; color: #f78166; line-height: 1; }
+  .dist-meta { font-size: 0.75rem; color: #8b949e; margin-top: 4px; }
+  .info-row { display: flex; justify-content: space-between; font-size: 0.78rem;
+              padding: 4px 0; border-bottom: 1px solid #21262d; }
   .info-row:last-child { border-bottom: none; }
-  button { background: #e94560; color: #fff; border: none; padding: 10px 18px;
-           border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-  button:hover { background: #d63a52; }
-  button.secondary { background: #334; }
-  button.secondary:hover { background: #445; }
-  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
-  .status { font-size: 0.8rem; color: #7a9; padding: 6px 0; }
+  .info-label { color: #8b949e; }
+  .info-value { color: #e6edf3; font-weight: 500; }
   .water-input { display: flex; gap: 8px; align-items: center; }
-  .water-input input { width: 80px; padding: 6px; border-radius: 4px; border: 1px solid #334;
-                       background: #1a1a2e; color: #eee; font-size: 0.85rem; }
-  .water-input label { font-size: 0.85rem; }
-  .scenario-select { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #334;
-                     background: #1a1a2e; color: #eee; font-size: 0.85rem; margin-bottom: 8px; }
-  .scenario-results { margin-top: 10px; }
-  .case-result { display: flex; justify-content: space-between; align-items: center;
-                 font-size: 0.8rem; padding: 6px 8px; border-radius: 4px;
-                 margin-bottom: 4px; background: #1a1a2e; }
-  .case-pass { color: #45e9a0; border-left: 3px solid #45e9a0; }
-  .case-fail { color: #e94560; border-left: 3px solid #e94560; }
-  .overall-badge { display: inline-block; padding: 3px 12px; border-radius: 12px;
-                   font-size: 0.78rem; font-weight: 700; margin-bottom: 8px; }
-  .overall-badge.pass { background: #45e9a0; color: #1a1a2e; }
-  .overall-badge.fail { background: #e94560; color: #fff; }
-  #scenario-desc { font-size: 0.8rem; color: #8899bb; margin-bottom: 8px; line-height: 1.4; }
-  #scenario-results { max-height: 300px; overflow-y: auto; }
-  #btn-run-scenario { display: none; margin-top: 6px; }
-  .scenario-meta-section { margin-top: 8px; border-top: 1px solid #1a2a4a; padding-top: 6px; }
-  .scenario-meta-section .info-row span:first-child { color: #a8b8d8; }
+  .water-input label { font-size: 0.82rem; color: #8b949e; }
+  .water-input input { width: 80px; padding: 6px 8px; border-radius: 6px;
+                       border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 0.82rem; }
+  .water-input input:focus { outline: none; border-color: #58a6ff; }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+         padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: background 0.15s; }
+  .btn:hover { background: #30363d; }
+  .btn-primary { background: #1f6feb; border-color: #1f6feb; }
+  .btn-primary:hover { background: #388bfd; }
+  .status-line { font-size: 0.75rem; color: #8b949e; padding: 6px 0 0; }
+  .tc-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+  .tc-item { background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+             padding: 8px 10px; cursor: pointer; transition: all 0.15s; }
+  .tc-item:hover { border-color: #58a6ff; background: #1c2128; }
+  .tc-item.active { border-color: #58a6ff; background: #1c2128; }
+  .tc-name { font-size: 0.8rem; font-weight: 600; color: #e6edf3; }
+  .tc-cat { font-size: 0.68rem; color: #8b949e; margin-top: 1px; }
+  .tc-tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+  .tc-tag { font-size: 0.63rem; background: #0d1117; color: #58a6ff;
+            border: 1px solid #1f6feb; padding: 1px 6px; border-radius: 10px; }
+  .result-badge { display: inline-block; padding: 2px 10px; border-radius: 10px;
+                  font-size: 0.73rem; font-weight: 600; margin-bottom: 6px; }
+  .result-pass { background: #1f4d2b; color: #3fb950; }
+  .result-fail { background: #4d1f1f; color: #f78166; }
+  .result-info { background: #1c2128; color: #8b949e; }
+  .desc-text { font-size: 0.72rem; color: #8b949e; line-height: 1.5; margin-top: 8px; }
+  .px-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .px-label { font-size: 0.72rem; color: #8b949e; margin-bottom: 2px; }
+  .px-input { width: 100%; padding: 5px 6px; border-radius: 4px; border: 1px solid #30363d;
+              background: #0d1117; color: #e6edf3; font-size: 0.78rem; margin-bottom: 4px; }
+  .px-input:focus { outline: none; border-color: #58a6ff; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>💧 Water Measurement Demo</h1>
-  <span class="badge" id="health-badge">checking...</span>
+  <h1>&#128167; 水面视觉测距系统</h1>
+  <span class="badge">3D 可视化演示</span>
+  <div style="flex:1"></div>
+  <span class="health" id="health-badge">检测中&#8230;</span>
 </header>
 
 <div class="main">
-  <div class="canvas-area">
-    <canvas id="canvas" width="1280" height="720"></canvas>
+  <div id="canvas-container">
+    <canvas id="three-canvas"></canvas>
+    <div class="canvas-hint">拖拽旋转 &middot; 滚轮缩放 &middot; 右键平移</div>
   </div>
 
   <div class="sidebar">
+    <!-- 测试用例面板 -->
     <div class="card">
-      <h3>场景选择 / Scenario</h3>
-      <select id="scenario-select" class="scenario-select">
-        <option value="">默认场景 / Default</option>
-      </select>
-      <div id="scenario-desc"></div>
-      <button id="btn-run-scenario">一键运行 / Run Preset</button>
-      <div id="scenario-results" class="scenario-results"></div>
+      <h3>测试用例可视化</h3>
+      <div class="tc-list" id="tc-list"><div style="color:#8b949e;font-size:0.75rem;">加载中&#8230;</div></div>
+      <div id="tc-desc" class="desc-text" style="display:none;"></div>
     </div>
 
+    <!-- 测距结果 -->
     <div class="card">
-      <h3>测距结果 / Distance</h3>
-      <div class="value" id="dist-value">—</div>
-      <div class="meta" id="dist-meta"></div>
+      <h3>测距结果</h3>
+      <div class="dist-value" id="dist-value">&#8212;</div>
+      <div class="dist-meta" id="dist-meta"></div>
+      <div id="result-badge-area" style="margin-top:8px;"></div>
     </div>
 
+    <!-- 诊断信息 -->
     <div class="card">
-      <h3>诊断信息 / Diagnostics</h3>
-      <div id="diag-info">
-        <div class="info-row"><span>Confidence</span><span id="d-conf">—</span></div>
-        <div class="info-row"><span>Elapsed</span><span id="d-time">—</span></div>
-        <div class="info-row"><span>Grazing</span><span id="d-graz">—</span></div>
-        <div class="info-row"><span>Status</span><span id="d-stat">—</span></div>
-      </div>
-      <div id="diag-scenario-meta" class="scenario-meta-section" style="display:none;"></div>
+      <h3>诊断信息</h3>
+      <div class="info-row"><span class="info-label">置信度</span><span class="info-value" id="d-conf">&#8212;</span></div>
+      <div class="info-row"><span class="info-label">耗时</span><span class="info-value" id="d-time">&#8212;</span></div>
+      <div class="info-row"><span class="info-label">入射角余弦</span><span class="info-value" id="d-graz">&#8212;</span></div>
+      <div class="info-row"><span class="info-label">系统状态</span><span class="info-value" id="d-stat">&#8212;</span></div>
+      <div class="info-row"><span class="info-label">水位 (m)</span><span class="info-value" id="d-wl">&#8212;</span></div>
     </div>
 
+    <!-- 水位参数 -->
     <div class="card">
-      <h3>水位 / Water Level</h3>
+      <h3>水位参数（手动测量）</h3>
       <div class="water-input">
         <label for="wl-input">h (m):</label>
-        <input type="number" id="wl-input" value="0.0" step="0.1">
+        <input type="number" id="wl-input" value="0.0" step="0.1" min="-10" max="50">
       </div>
     </div>
 
+    <!-- 手动测量 -->
     <div class="card">
-      <h3>操作</h3>
+      <h3>手动测量</h3>
+      <div class="px-grid">
+        <div>
+          <div class="px-label">点 1 像素坐标</div>
+          <input type="number" class="px-input" id="px1-x" placeholder="X">
+          <input type="number" class="px-input" id="px1-y" placeholder="Y">
+        </div>
+        <div>
+          <div class="px-label">点 2 像素坐标</div>
+          <input type="number" class="px-input" id="px2-x" placeholder="X">
+          <input type="number" class="px-input" id="px2-y" placeholder="Y">
+        </div>
+      </div>
       <div class="controls">
-        <button id="btn-clear">清除选点</button>
-        <button class="secondary" id="btn-grid">显示网格</button>
+        <button class="btn btn-primary" id="btn-measure">开始测量</button>
+        <button class="btn" id="btn-reset">重置场景</button>
       </div>
-      <div class="status" id="status-line">左键点选两点进行测距，右键或点击"清除"重置</div>
+      <div class="status-line" id="status-line">请选择测试用例或输入像素坐标</div>
     </div>
 
+    <!-- 说明 -->
     <div class="card">
-      <h3>说明</h3>
-      <div style="font-size:0.8rem; color:#8899bb; line-height:1.5">
-        本 Demo 展示单目视觉测距系统的点选测距功能。<br>
-        画布模拟 1280×720 相机视野，点选任意两点，系统输出两点在水面参考平面上的实际距离。<br>
-        支持实时调整水位参数。
+      <h3>图例说明</h3>
+      <div style="font-size:0.72rem;color:#8b949e;line-height:1.8;">
+        <span style="color:#ffd700;">&#9632;</span> 金色视锥体 = 相机位置与姿态<br>
+        <span style="color:#1a5f7a;">&#9632;</span> 蓝绿平面 = 水面（含水位高度）<br>
+        <span style="color:#f78166;">&#9632;</span> 红色射线 = 从相机到水面的 3D 光线<br>
+        <span style="color:#e9a045;">&#9632;</span> 橙色连线 = 实际测量距离
       </div>
     </div>
   </div>
 </div>
 
-<script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let points = [];
-let showGrid = false;
+// World (X, Y_depth, Z_up) -> Three.js (X, Z_up, -Y_depth)
+function w2t(wx, wy, wz) { return new THREE.Vector3(wx, wz, -wy); }
+function w2tv(arr) { return w2t(arr[0], arr[1], arr[2]); }
 
-// Draw background scene (synthetic water surface)
-function drawScene() {
-  // Sky gradient
-  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.4);
-  sky.addColorStop(0, '#4a7c9b');
-  sky.addColorStop(1, '#7bb3cc');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H * 0.4);
+// Scene setup
+const container = document.getElementById('canvas-container');
+const canvas3 = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas3, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x0d1117, 1);
 
-  // Water surface
-  const water = ctx.createLinearGradient(0, H * 0.4, 0, H);
-  water.addColorStop(0, '#2a5a6a');
-  water.addColorStop(0.5, '#1a4a5a');
-  water.addColorStop(1, '#0a3040');
-  ctx.fillStyle = water;
-  ctx.fillRect(0, H * 0.4, W, H * 0.6);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0d1117, 100, 400);
 
-  // Water ripples
-  ctx.strokeStyle = 'rgba(120,200,230,0.15)';
-  ctx.lineWidth = 1;
-  for (let y = H * 0.42; y < H; y += 18) {
-    ctx.beginPath();
-    for (let x = 0; x < W; x += 2) {
-      const yy = y + Math.sin(x * 0.02 + y * 0.1) * 3;
-      x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
-    }
-    ctx.stroke();
-  }
+const viewCam = new THREE.PerspectiveCamera(55, 1, 0.05, 1000);
+viewCam.position.set(14, 10, 14);
+viewCam.lookAt(0, 2, -8);
 
-  // Shore line
-  ctx.strokeStyle = 'rgba(180,160,120,0.4)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, H * 0.4);
-  ctx.lineTo(W, H * 0.4);
-  ctx.stroke();
+const controls = new OrbitControls(viewCam, renderer.domElement);
+controls.target.set(0, 2, -8);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1;
+controls.maxDistance = 300;
 
-  // Grid overlay
-  if (showGrid) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 0.5;
-    for (let x = 0; x < W; x += 64) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    }
-    for (let y = 0; y < H; y += 64) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-  }
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dLight.position.set(10, 20, 10);
+scene.add(dLight);
 
-  // Coordinate hint
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '11px monospace';
-  ctx.fillText(`${W}×${H}`, W - 74, H - 8);
+// World axes
+const axes = new THREE.AxesHelper(3);
+axes.position.y = 0.02;
+scene.add(axes);
+
+function onResize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h, false);
+  viewCam.aspect = w / h;
+  viewCam.updateProjectionMatrix();
+}
+new ResizeObserver(onResize).observe(container);
+onResize();
+
+(function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, viewCam); })();
+
+// Scene groups
+let waterGroup = new THREE.Group();
+let cameraGroup = new THREE.Group();
+let measureGroup = new THREE.Group();
+scene.add(waterGroup, cameraGroup, measureGroup);
+
+function buildWaterPlane(h) {
+  const g = new THREE.Group();
+  // Surface mesh
+  const geo = new THREE.PlaneGeometry(80, 80);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1a5f7a, transparent: true, opacity: 0.5, side: THREE.DoubleSide, roughness: 0.9 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = h;
+  g.add(mesh);
+  // Grid
+  const grid = new THREE.GridHelper(80, 40, 0x1e7a9c, 0x1a4d5e);
+  grid.position.y = h + 0.01;
+  g.add(grid);
+  return g;
 }
 
-function draw() {
-  ctx.clearRect(0, 0, W, H);
-  drawScene();
+function buildCameraFrustum(cw, R) {
+  // R[row][col]: R[i][j] means R_ij
+  // Camera optical axis in world = R^T[:,2] = [R[0][2], R[1][2], R[2][2]]
+  const zw = [R[0][2], R[1][2], R[2][2]];
+  const xw = [R[0][0], R[1][0], R[2][0]];
+  const yw = [R[0][1], R[1][1], R[2][1]];
+  const add = (a,b) => [a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+  const mul = (a,s) => [a[0]*s,a[1]*s,a[2]*s];
+  const depth = 3.0, fH = 1.2, fV = 0.7;
+  const front = add(cw, mul(zw, depth));
+  const corners = [
+    add(add(front, mul(xw, fH)), mul(yw, fV)),
+    add(add(front, mul(xw, -fH)), mul(yw, fV)),
+    add(add(front, mul(xw, -fH)), mul(yw, -fV)),
+    add(add(front, mul(xw, fH)), mul(yw, -fV)),
+  ];
+  const pts = [];
+  for (const c of corners) { pts.push(w2tv(cw), w2tv(c)); }
+  for (let i = 0; i < 4; i++) { pts.push(w2tv(corners[i]), w2tv(corners[(i+1)%4])); }
+  pts.push(w2tv(cw), w2tv(add(cw, mul(zw, depth * 1.4))));
+  const fGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const fMat = new THREE.LineBasicMaterial({ color: 0xffd700 });
+  const frustum = new THREE.LineSegments(fGeo, fMat);
+  const spGeo = new THREE.SphereGeometry(0.25, 12, 8);
+  const spMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.4 });
+  const sp = new THREE.Mesh(spGeo, spMat);
+  sp.position.copy(w2tv(cw));
+  const grp = new THREE.Group();
+  grp.add(frustum, sp);
+  return grp;
+}
 
-  // Draw points
-  points.forEach((p, i) => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = i === 0 ? '#e94560' : '#45e9a0';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText(`P${i+1} (${Math.round(p.x)}, ${Math.round(p.y)})`, p.x + 10, p.y - 8);
+function buildMeasurement(cc, p1, p2) {
+  const g = new THREE.Group();
+  const cpv = w2tv(cc), p1v = w2tv(p1), p2v = w2tv(p2);
+  // Rays
+  [[cpv, p1v], [cpv, p2v]].forEach(([a,b]) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([a,b]);
+    g.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xf78166, transparent: true, opacity: 0.8 })));
   });
-
-  // Draw line between points
-  if (points.length === 2) {
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    ctx.lineTo(points[1].x, points[1].y);
-    ctx.strokeStyle = '#e9a045';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
+  // Intersection spheres
+  const sGeo = new THREE.SphereGeometry(0.15, 12, 8);
+  [{ pos: p1v, c: 0xf78166 }, { pos: p2v, c: 0x3fb950 }].forEach(({ pos, c }) => {
+    const m = new THREE.Mesh(sGeo, new THREE.MeshStandardMaterial({ color: c, roughness: 0.3 }));
+    m.position.copy(pos);
+    g.add(m);
+  });
+  // Distance line
+  const dGeo = new THREE.BufferGeometry().setFromPoints([p1v, p2v]);
+  g.add(new THREE.Line(dGeo, new THREE.LineBasicMaterial({ color: 0xe9a045 })));
+  return g;
 }
 
-canvas.addEventListener('click', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const scaleY = H / rect.height;
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top) * scaleY;
+function updateScene(data) {
+  const wl = data.water_level_m != null ? data.water_level_m : 0;
+  scene.remove(waterGroup); waterGroup = buildWaterPlane(wl); scene.add(waterGroup);
+  scene.remove(cameraGroup); cameraGroup = new THREE.Group();
+  if (data.camera_center_world && data.camera_pose_R) {
+    cameraGroup = buildCameraFrustum(data.camera_center_world, data.camera_pose_R);
+  }
+  scene.add(cameraGroup);
+  scene.remove(measureGroup); measureGroup = new THREE.Group();
+  if (data.point1_world && data.point2_world && data.camera_center_world) {
+    measureGroup = buildMeasurement(data.camera_center_world, data.point1_world, data.point2_world);
+  }
+  scene.add(measureGroup);
+}
 
-  if (points.length >= 2) points = [];
-  points.push({ x, y });
-  draw();
+function resetScene() {
+  scene.remove(waterGroup, cameraGroup, measureGroup);
+  waterGroup = buildWaterPlane(0);
+  cameraGroup = new THREE.Group();
+  measureGroup = new THREE.Group();
+  scene.add(waterGroup, cameraGroup, measureGroup);
+}
+resetScene();
 
-  if (points.length === 2) {
-    doMeasure();
+function updateResultPanel(mr, expectedDist, relError, passed) {
+  const dv = document.getElementById('dist-value');
+  if (mr.success && mr.distance_m != null) {
+    dv.textContent = mr.distance_m.toFixed(3) + ' m';
+    dv.style.color = '#f78166';
+    document.getElementById('dist-meta').textContent = mr.message;
   } else {
-    document.getElementById('status-line').textContent = '已选第1点，请点选第2点';
+    dv.textContent = '测量失败';
+    dv.style.color = '#8b949e';
+    document.getElementById('dist-meta').textContent = mr.message || '';
   }
-});
-
-canvas.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  clearPoints();
-});
-
-document.getElementById('btn-clear').addEventListener('click', clearPoints);
-document.getElementById('btn-grid').addEventListener('click', () => {
-  showGrid = !showGrid;
-  draw();
-});
-
-function clearPoints() {
-  points = [];
-  draw();
-  document.getElementById('dist-value').textContent = '—';
-  document.getElementById('dist-meta').textContent = '';
-  document.getElementById('d-conf').textContent = '—';
-  document.getElementById('d-time').textContent = '—';
-  document.getElementById('d-graz').textContent = '—';
-  document.getElementById('d-stat').textContent = '—';
-  document.getElementById('status-line').textContent = '左键点选两点进行测距';
+  document.getElementById('d-conf').textContent = mr.confidence != null ? mr.confidence.toFixed(3) : '—';
+  document.getElementById('d-time').textContent = mr.elapsed_ms != null ? mr.elapsed_ms.toFixed(2) + ' ms' : '—';
+  const graz = (mr.diagnostics || {}).grazing;
+  document.getElementById('d-graz').textContent = graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
+  document.getElementById('d-stat').textContent = mr.message || '—';
+  document.getElementById('d-wl').textContent = mr.water_level_m != null ? mr.water_level_m.toFixed(2) + ' m' : '—';
+  let html = '';
+  if (passed === true) {
+    html = `<span class="result-badge result-pass">&#10003; 通过${relError != null ? ' (误差 ' + (relError*100).toFixed(2) + '%)' : ''}</span>`;
+  } else if (passed === false) {
+    html = `<span class="result-badge result-fail">&#10007; 未通过${relError != null ? ' (误差 ' + (relError*100).toFixed(2) + '%)' : ''}</span>`;
+  } else if (passed === null && expectedDist == null) {
+    html = '<span class="result-badge result-info">退化场景（预期失败）</span>';
+  }
+  if (expectedDist != null) {
+    html += `<div style="font-size:0.72rem;color:#8b949e;margin-top:4px;">期望: ${expectedDist.toFixed(3)} m</div>`;
+  }
+  document.getElementById('result-badge-area').innerHTML = html;
 }
 
-async function doMeasure() {
-  const wl = parseFloat(document.getElementById('wl-input').value) || 0.0;
-  document.getElementById('status-line').textContent = '测量中...';
-
+// Test cases
+let tcCache = [];
+async function loadTestCases() {
   try {
-    const body = {
-      point1: { x: points[0].x, y: points[0].y },
-      point2: { x: points[1].x, y: points[1].y },
-      water_level_m: wl,
-    };
-    if (currentScenarioId) {
-      body.scenario_id = currentScenarioId;
-    }
-    const resp = await fetch('/measure', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const r = await fetch('/test_cases');
+    tcCache = await r.json();
+    const el = document.getElementById('tc-list');
+    el.innerHTML = tcCache.map(tc =>
+      `<div class="tc-item" data-id="${tc.id}">
+        <div class="tc-name">${tc.name}</div>
+        <div class="tc-cat">${tc.category}</div>
+        <div class="tc-tags">${tc.tags.map(t => `<span class="tc-tag">${t}</span>`).join('')}</div>
+      </div>`
+    ).join('');
+    el.querySelectorAll('.tc-item').forEach(item => {
+      item.addEventListener('click', () => selectTestCase(item.dataset.id));
     });
-    const data = await resp.json();
-
-    if (data.success && data.distance_m !== null && data.distance_m !== undefined) {
-      document.getElementById('dist-value').textContent = data.distance_m.toFixed(3) + ' m';
-      document.getElementById('dist-meta').textContent = data.message;
-
-      // Draw distance label on canvas
-      const mx = (points[0].x + points[1].x) / 2;
-      const my = (points[0].y + points[1].y) / 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(mx - 50, my - 22, 100, 24);
-      ctx.fillStyle = '#e9a045';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(data.distance_m.toFixed(3) + ' m', mx, my - 4);
-      ctx.textAlign = 'start';
-    } else {
-      document.getElementById('dist-value').textContent = 'FAIL';
-      document.getElementById('dist-meta').textContent = data.message;
-    }
-
-    document.getElementById('d-conf').textContent = data.confidence != null ? data.confidence.toFixed(3) : '—';
-    document.getElementById('d-time').textContent = data.elapsed_ms != null ? data.elapsed_ms.toFixed(2) + ' ms' : '—';
-    const diag = data.diagnostics || {};
-    const graz = diag.grazing;
-    document.getElementById('d-graz').textContent = graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
-    document.getElementById('d-stat').textContent = data.message;
-    if (diag.scenario_meta) {
-      showScenarioMeta(diag.scenario_meta);
-    }
-    document.getElementById('status-line').textContent = '测距完成，点击"清除"或继续点选';
-  } catch (err) {
-    document.getElementById('status-line').textContent = '请求失败: ' + err.message;
-    document.getElementById('dist-value').textContent = 'ERR';
+  } catch(e) {
+    document.getElementById('tc-list').innerHTML = `<div style="color:#f78166;font-size:0.75rem;">加载失败: ${e.message}</div>`;
   }
 }
 
-// Health check
+async function selectTestCase(id) {
+  document.querySelectorAll('.tc-item').forEach(el => el.classList.toggle('active', el.dataset.id === id));
+  const tc = tcCache.find(t => t.id === id);
+  const descEl = document.getElementById('tc-desc');
+  if (tc) { descEl.textContent = tc.description; descEl.style.display = 'block'; }
+  document.getElementById('status-line').textContent = '正在运行测试用例…';
+  try {
+    const r = await fetch('/test_cases/' + encodeURIComponent(id) + '/run', { method: 'POST', headers: {'Content-Type':'application/json'} });
+    const d = await r.json();
+    const mr = d.measure_result;
+    updateScene({ camera_center_world: mr.camera_center_world, camera_pose_R: mr.camera_pose_R,
+                  point1_world: mr.point1_world, point2_world: mr.point2_world, water_level_m: mr.water_level_m });
+    updateResultPanel(mr, d.expected_distance_m, d.relative_error, d.passed);
+    document.getElementById('status-line').textContent = '已加载: ' + d.name;
+  } catch(e) {
+    document.getElementById('status-line').textContent = '运行失败: ' + e.message;
+  }
+}
+
+document.getElementById('btn-measure').addEventListener('click', async () => {
+  const x1 = parseFloat(document.getElementById('px1-x').value);
+  const y1 = parseFloat(document.getElementById('px1-y').value);
+  const x2 = parseFloat(document.getElementById('px2-x').value);
+  const y2 = parseFloat(document.getElementById('px2-y').value);
+  if ([x1,y1,x2,y2].some(isNaN)) { document.getElementById('status-line').textContent = '请填写完整的像素坐标'; return; }
+  const wl = parseFloat(document.getElementById('wl-input').value) || 0;
+  document.getElementById('status-line').textContent = '测量中…';
+  try {
+    const r = await fetch('/measure', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ point1:{x:x1,y:y1}, point2:{x:x2,y:y2}, water_level_m:wl }) });
+    const d = await r.json();
+    updateScene({ camera_center_world:d.camera_center_world, camera_pose_R:d.camera_pose_R,
+                  point1_world:d.point1_world, point2_world:d.point2_world, water_level_m:d.water_level_m });
+    updateResultPanel(d, null, null, null);
+    document.getElementById('status-line').textContent = '手动测量完成';
+  } catch(e) {
+    document.getElementById('status-line').textContent = '请求失败: ' + e.message;
+  }
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  resetScene();
+  document.querySelectorAll('.tc-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('tc-desc').style.display = 'none';
+  ['dist-value','dist-meta','result-badge-area','d-conf','d-time','d-graz','d-stat','d-wl'].forEach(id => {
+    document.getElementById(id).innerHTML = id === 'dist-value' ? '&#8212;' : '';
+  });
+  document.getElementById('status-line').textContent = '场景已重置';
+});
+
 async function checkHealth() {
+  const b = document.getElementById('health-badge');
   try {
-    const resp = await fetch('/health');
-    const data = await resp.json();
-    const badge = document.getElementById('health-badge');
-    badge.textContent = data.status === 'ok' ? '● Online' : '○ Error';
-    badge.style.background = data.status === 'ok' ? '#0a5' : '#a00';
+    const d = await (await fetch('/health')).json();
+    if (d.status === 'ok') {
+      b.textContent = '&#9679; 系统在线'; b.style.background = '#1f4d2b'; b.style.color = '#3fb950';
+    } else {
+      b.textContent = '&#9675; 异常'; b.style.background = '#4d1f1f'; b.style.color = '#f78166';
+    }
   } catch {
-    document.getElementById('health-badge').textContent = '○ Offline';
-    document.getElementById('health-badge').style.background = '#a00';
+    b.textContent = '&#9675; 离线'; b.style.background = '#4d1f1f'; b.style.color = '#f78166';
   }
 }
 
-// --- Scenario Selection & One-Click Run ---
-let currentScenarioId = '';
-let scenariosCache = [];
-
-async function loadScenarios() {
-  try {
-    const resp = await fetch('/scenarios');
-    const scenarios = await resp.json();
-    scenariosCache = scenarios;
-    const sel = document.getElementById('scenario-select');
-    scenarios.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.name;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    console.warn('Failed to load scenarios:', e);
-  }
-}
-
-document.getElementById('scenario-select').addEventListener('change', function() {
-  currentScenarioId = this.value;
-  const descEl = document.getElementById('scenario-desc');
-  const btnRun = document.getElementById('btn-run-scenario');
-  const resultsEl = document.getElementById('scenario-results');
-  resultsEl.innerHTML = '';
-
-  if (currentScenarioId) {
-    const sc = scenariosCache.find(s => s.id === currentScenarioId);
-    descEl.textContent = sc ? sc.description : '';
-    btnRun.style.display = 'block';
-  } else {
-    descEl.textContent = '';
-    btnRun.style.display = 'none';
-  }
-});
-
-document.getElementById('btn-run-scenario').addEventListener('click', async function() {
-  if (!currentScenarioId) return;
-  const resultsEl = document.getElementById('scenario-results');
-  resultsEl.innerHTML = '<div style="color:#8899bb;font-size:0.8rem;">运行中...</div>';
-
-  try {
-    const resp = await fetch('/scenarios/' + encodeURIComponent(currentScenarioId) + '/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const data = await resp.json();
-    let html = '';
-
-    // Overall badge
-    const passClass = data.overall_pass ? 'pass' : 'fail';
-    const passText = data.overall_pass ? 'PASS' : 'FAIL';
-    html += '<span class="overall-badge ' + passClass + '">' + passText + '</span>';
-
-    // Display scenario meta in diagnostics
-    if (data.meta) {
-      showScenarioMeta(data.meta);
-    }
-
-    // Case results
-    if (data.cases && data.cases.length) {
-      data.cases.forEach(c => {
-        const cls = c.passed ? 'case-pass' : 'case-fail';
-        const badge = c.passed ? '✓' : '✗';
-        const measured = c.measured_distance_m != null ? c.measured_distance_m.toFixed(3) : '—';
-        const expected = c.expected_distance_m != null ? c.expected_distance_m.toFixed(3) : '—';
-        const error = c.relative_error != null ? (c.relative_error * 100).toFixed(1) + '%' : '—';
-        html += '<div class="case-result ' + cls + '">'
-          + '<span>' + badge + ' ' + (c.name || '') + '</span>'
-          + '<span>' + measured + ' / ' + expected + ' m (' + error + ')</span>'
-          + '</div>';
-      });
-
-      // Draw preset points and lines on canvas
-      drawPresetCases(data.cases);
-    }
-    resultsEl.innerHTML = html;
-  } catch (err) {
-    resultsEl.innerHTML = '<div style="color:#e94560;font-size:0.8rem;">运行失败: ' + err.message + '</div>';
-  }
-});
-
-function drawPresetCases(cases) {
-  draw();
-  cases.forEach((c, i) => {
-    if (!c.point1 || !c.point2) return;
-    const p1 = c.point1;
-    const p2 = c.point2;
-    const color = c.passed ? '#45e9a0' : '#e94560';
-
-    // Draw points
-    [p1, p2].forEach(p => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    });
-
-    // Draw line
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Label
-    const mx = (p1.x + p2.x) / 2;
-    const my = (p1.y + p2.y) / 2;
-    const measured = c.measured_distance_m != null ? c.measured_distance_m.toFixed(2) + 'm' : '—';
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(mx - 30, my - 14 + i * 16, 60, 16);
-    ctx.fillStyle = color;
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(measured, mx, my - 2 + i * 16);
-    ctx.textAlign = 'start';
-  });
-}
-
-function showScenarioMeta(meta) {
-  const el = document.getElementById('diag-scenario-meta');
-  if (!meta || Object.keys(meta).length === 0) {
-    el.style.display = 'none';
-    return;
-  }
-  let html = '<div style="font-size:0.78rem;color:#a8b8d8;margin-bottom:4px;">Scenario Meta</div>';
-  Object.entries(meta).forEach(([k, v]) => {
-    html += '<div class="info-row"><span>' + k + '</span><span>' + v + '</span></div>';
-  });
-  el.innerHTML = html;
-  el.style.display = 'block';
-}
-
-draw();
-loadScenarios();
+loadTestCases();
 checkHealth();
-setInterval(checkHealth, 10000);
+setInterval(checkHealth, 15000);
 </script>
 </body>
 </html>
