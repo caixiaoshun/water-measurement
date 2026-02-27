@@ -347,7 +347,9 @@ class TestAttitudeDrift:
         for _ in range(n_trials):
             # Generate random disturbance
             translation = rng.uniform([-0.3, -0.3, -0.2], [0.3, 0.3, 0.2])
-            while float(np.linalg.norm(translation)) <= 0.05:
+            for _retry in range(100):
+                if float(np.linalg.norm(translation)) > 0.05:
+                    break
                 translation = rng.uniform([-0.3, -0.3, -0.2], [0.3, 0.3, 0.2])
             tilt_deg = float(rng.uniform(2.3, 8.0))
             tilt_axis = rng.normal(0.0, 1.0, size=3)

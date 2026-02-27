@@ -141,6 +141,8 @@ def measure(req: MeasureRequest):
         camera=_DEFAULT_CAMERA,
         pose_w2c=_DEFAULT_POSE,
         plane=plane,
+        # Demo uses fixed pose (no live marker detection), so extrinsics_score=1.0.
+        # In production, this would come from the ExtrinsicsEstimator quality score.
         extrinsics_score=1.0,
     )
 

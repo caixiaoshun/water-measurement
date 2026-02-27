@@ -269,8 +269,8 @@ async function doMeasure() {
       document.getElementById('dist-meta').textContent = data.message;
     }
 
-    document.getElementById('d-conf').textContent = data.confidence.toFixed(3);
-    document.getElementById('d-time').textContent = data.elapsed_ms.toFixed(2) + ' ms';
+    document.getElementById('d-conf').textContent = data.confidence != null ? data.confidence.toFixed(3) : '—';
+    document.getElementById('d-time').textContent = data.elapsed_ms != null ? data.elapsed_ms.toFixed(2) + ' ms' : '—';
     const diag = data.diagnostics || {};
     const graz = diag.grazing;
     document.getElementById('d-graz').textContent = graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
