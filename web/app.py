@@ -46,37 +46,7 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Default camera / pose / plane (demo configuration)
-# ---------------------------------------------------------------------------
-
-_DEFAULT_CAMERA = CameraParams(
-    name="demo_cam",
-    model="pinhole",
-    width=1280,
-    height=720,
-    K=np.array([[920.0, 0.0, 640.0], [0.0, 920.0, 360.0], [0.0, 0.0, 1.0]], dtype=np.float64),
-    D=np.zeros(5, dtype=np.float64),
-)
-
-_DEFAULT_WATER_LEVEL = 0.0
-_DEFAULT_PLANE = Plane.from_height(_DEFAULT_WATER_LEVEL)
-
-# Camera looking down at a water surface at z=0
-_DEFAULT_POSE = Pose(
-    R=np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 0.6, -0.8],
-        [0.0, 0.8, 0.6],
-    ], dtype=np.float64),
-    t=np.array([0.0, -4.8, 6.4], dtype=np.float64),
-)
-
-_estimator_cfg = ExtrinsicsEstimatorConfig()
-_estimator = ExtrinsicsEstimator(_estimator_cfg)
-
-
-# ---------------------------------------------------------------------------
-# Geometry helpers
+# Geometry helpers (defined first so _DEFAULT_POSE can use them)
 # ---------------------------------------------------------------------------
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -120,6 +90,33 @@ def _euler_deg_to_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
     Ry = np.array([[np.cos(ryr), 0, np.sin(ryr)], [0, 1, 0], [-np.sin(ryr), 0, np.cos(ryr)]], dtype=np.float64)
     Rz = np.array([[np.cos(rzr), -np.sin(rzr), 0], [np.sin(rzr), np.cos(rzr), 0], [0, 0, 1]], dtype=np.float64)
     return Rz @ Ry @ Rx
+
+
+# ---------------------------------------------------------------------------
+# Default camera / pose / plane (demo configuration)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CAMERA = CameraParams(
+    name="demo_cam",
+    model="pinhole",
+    width=1280,
+    height=720,
+    K=np.array([[920.0, 0.0, 640.0], [0.0, 920.0, 360.0], [0.0, 0.0, 1.0]], dtype=np.float64),
+    D=np.zeros(5, dtype=np.float64),
+)
+
+_DEFAULT_WATER_LEVEL = 0.0
+_DEFAULT_PLANE = Plane.from_height(_DEFAULT_WATER_LEVEL)
+
+# Camera looking down at a water surface at z=0 from [0, -4.8, 6.4] toward [0, 10, 0].
+# Use _look_at_pose so camera_center_world() returns a visualizable above-water position.
+_DEFAULT_POSE = _look_at_pose(
+    camera_center_w=np.array([0.0, -4.8, 6.4], dtype=np.float64),
+    target_w=np.array([0.0, 10.0, 0.0]),
+)
+
+_estimator_cfg = ExtrinsicsEstimatorConfig()
+_estimator = ExtrinsicsEstimator(_estimator_cfg)
 
 
 # ---------------------------------------------------------------------------

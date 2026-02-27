@@ -161,7 +161,7 @@
     <div class="card">
       <h3>图例说明</h3>
       <div style="font-size:0.72rem;color:#8b949e;line-height:1.8;">
-        <span style="color:#ffd700;">&#9632;</span> 金色视锥体 = 相机位置与姿态<br>
+        <span style="color:#ffd700;">&#9632;</span> 金色视锥体 = 枪式摄像机位置与姿态（镜头朝向视轴）<br>
         <span style="color:#1a9fff;">&#9632;</span> 蓝色动态水面 = 真实水面（含水位高度）<br>
         <span style="color:#00aaff;">&#9632;</span> 科技蓝光束 = 从相机到水面的 3D 光线<br>
         <span style="color:#ff8800;">&#9632;</span> 橙色连线 = 实际测量距离<br>
@@ -300,13 +300,14 @@ let measureGroup = new THREE.Group();
 scene.add(cameraGroup, measureGroup);
 
 // Camera fly-to animation
-const FLY_DURATION_S = 1.3;
+const FLY_DURATION_S = 2.0;
 let flyFrom    = null;
 let flyTarget  = null;
 let flyT       = 1.0;
 let flyStart   = 0;
 
-function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+// Smootherstep (Ken Perlin): 6t^5 - 15t^4 + 10t^3 — smoother than quadratic easeInOut
+function easeInOut(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 
 function startFly(toPos, toTarget) {
   flyFrom   = { pos: viewCam.position.clone(), target: controls.target.clone() };
@@ -315,10 +316,12 @@ function startFly(toPos, toTarget) {
   flyStart  = performance.now();
 }
 
-// Render loop
+// Render loop — use clock delta so water speed stays constant regardless of framerate
+const clock = new THREE.Clock();
 (function animate() {
   requestAnimationFrame(animate);
-  waterMesh.material.uniforms['time'].value += 1.0 / 60.0;
+  const delta = clock.getDelta();
+  waterMesh.material.uniforms['time'].value += delta;
   if (flyT < 1.0) {
     flyT = Math.min((performance.now() - flyStart) / (FLY_DURATION_S * 1000), 1.0);
     const t = easeInOut(flyT);
@@ -330,53 +333,120 @@ function startFly(toPos, toTarget) {
   labelRenderer.render(scene, viewCam);
 })();
 
-// Camera model (frustum wireframe + body mesh)
+// Bullet-camera model (IP surveillance gun camera)
+// All geometry built in local space with +Z = optical axis / lens direction.
+// The group is then oriented so local +Z aligns with the world optical axis.
 function buildCameraModel(cw, R) {
-  const zw = [R[0][2], R[1][2], R[2][2]];
-  const xw = [R[0][0], R[1][0], R[2][0]];
-  const yw = [R[0][1], R[1][1], R[2][1]];
+  // World-space camera axes (columns of R^T = rows of R transposed)
+  const zw = [R[0][2], R[1][2], R[2][2]]; // optical axis (forward, toward scene)
+  const xw = [R[0][0], R[1][0], R[2][0]]; // right
+  const yw = [R[0][1], R[1][1], R[2][1]]; // down in camera space
+
+  // Convert to Three.js space (w2t: wx,wy,wz → Three x,y,z)
+  const zwT = new THREE.Vector3(zw[0], zw[2], -zw[1]).normalize();
+  let upT   = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(zwT.dot(upT)) > 0.999) upT.set(1, 0, 0);
+
+  // Frustum wireframe
   const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
   const mul = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
-  const depth = 3.0, fH = 1.2, fV = 0.7;
+  const depth = 3.5, fH = 1.5, fV = 0.85;
   const front   = add(cw, mul(zw, depth));
   const corners = [
-    add(add(front,  mul(xw,  fH)), mul(yw,  fV)),
-    add(add(front,  mul(xw, -fH)), mul(yw,  fV)),
-    add(add(front,  mul(xw, -fH)), mul(yw, -fV)),
-    add(add(front,  mul(xw,  fH)), mul(yw, -fV)),
+    add(add(front, mul(xw,  fH)), mul(yw,  fV)),
+    add(add(front, mul(xw, -fH)), mul(yw,  fV)),
+    add(add(front, mul(xw, -fH)), mul(yw, -fV)),
+    add(add(front, mul(xw,  fH)), mul(yw, -fV)),
   ];
   const pts = [];
   for (const c of corners)  { pts.push(w2tv(cw), w2tv(c)); }
   for (let i = 0; i < 4; i++) { pts.push(w2tv(corners[i]), w2tv(corners[(i+1)%4])); }
-  pts.push(w2tv(cw), w2tv(add(cw, mul(zw, depth * 1.5))));
+  pts.push(w2tv(cw), w2tv(add(cw, mul(zw, depth * 1.6))));
   const frustum = new THREE.LineSegments(
     new THREE.BufferGeometry().setFromPoints(pts),
-    new THREE.LineBasicMaterial({ color: 0xffd700 })
+    new THREE.LineBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.85 })
   );
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.3, 0.75),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.55, metalness: 0.5 })
+
+  // Materials
+  const bodyMat    = new THREE.MeshStandardMaterial({ color: 0x2c2c2e, roughness: 0.35, metalness: 0.78 });
+  const accentMat  = new THREE.MeshStandardMaterial({ color: 0x48484a, roughness: 0.50, metalness: 0.60 });
+  const lensMat    = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.05, metalness: 0.95 });
+  const glassMat   = new THREE.MeshStandardMaterial({
+    color: 0x1a3a6b, roughness: 0.0, metalness: 0.15,
+    transparent: true, opacity: 0.82, blending: THREE.NormalBlending,
+  });
+  const goldMat    = new THREE.MeshStandardMaterial({
+    color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.85, roughness: 0.2, metalness: 0.0,
+  });
+
+  const cam = new THREE.Group();
+
+  // ── Main cylindrical body (axis along +Z after CylGeo rotation) ──
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.30, 24), bodyMat);
+  body.rotation.x = Math.PI / 2;
+  cam.add(body);
+
+  // Rear end cap (slightly tapered)
+  const rearCap = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.17, 0.10, 24), bodyMat);
+  rearCap.rotation.x = Math.PI / 2;
+  rearCap.position.z = -0.70;
+  cam.add(rearCap);
+
+  // ── Lens housing at front (tapers toward lens) ──
+  const lensHousing = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.21, 0.30, 24), bodyMat);
+  lensHousing.rotation.x = Math.PI / 2;
+  lensHousing.position.z = 0.80;
+  cam.add(lensHousing);
+
+  // Lens barrel ring
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.10, 24), lensMat);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.z = 0.97;
+  cam.add(barrel);
+
+  // Glass element (the shiny front face)
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.04, 32), glassMat);
+  glass.rotation.x = Math.PI / 2;
+  glass.position.z = 1.025;
+  cam.add(glass);
+
+  // Sun-shade visor ring
+  const visor = new THREE.Mesh(
+    new THREE.TorusGeometry(0.175, 0.018, 8, 32),
+    accentMat
   );
-  const lens = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.14, 0.17, 0.38, 20),
-    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.08, metalness: 0.9 })
-  );
-  lens.rotation.x = Math.PI / 2;
-  lens.position.z = 0.55;
-  const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 18, 12),
-    new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.6, roughness: 0.25 })
-  );
-  const zwT = new THREE.Vector3(zw[0], zw[2], -zw[1]).normalize();
-  const upT  = new THREE.Vector3(0, 1, 0);
-  if (Math.abs(zwT.dot(upT)) > 0.999) upT.set(1, 0, 0);
-  const bodyObj = new THREE.Group();
-  bodyObj.add(body, lens);
-  bodyObj.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), zwT, upT));
-  bodyObj.position.copy(w2tv(cw));
-  sphere.position.copy(w2tv(cw));
+  visor.rotation.y = Math.PI / 2;
+  visor.position.z = 0.965;
+  cam.add(visor);
+
+  // ── Top ridge strip ──
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.07, 0.90), accentMat);
+  ridge.position.set(0, 0.255, 0);
+  cam.add(ridge);
+
+  // ── Mounting bracket (vertical arm + horizontal base) ──
+  const bracketArm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.10), accentMat);
+  bracketArm.position.set(0, -(0.22 + 0.21), 0.05);
+  cam.add(bracketArm);
+
+  const bracketBase = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.22), accentMat);
+  bracketBase.position.set(0, -(0.22 + 0.42 + 0.04), 0.05);
+  cam.add(bracketBase);
+
+  // ── Position indicator (small golden sphere at camera centre) ──
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), goldMat);
+
+  // Orient the bullet camera so that its local +Z axis aligns with zwT (the optical axis).
+  // THREE.Matrix4.lookAt(eye, target, up) makes the local −Z face the target, so by
+  // swapping eye↔target (lookAt(zwT, origin, up)) the −Z faces origin and +Z faces zwT.
+  // This ensures the lens (at local +Z) points toward the scene rather than away from it.
+  const lookMat = new THREE.Matrix4().lookAt(zwT, new THREE.Vector3(), upT);
+  cam.quaternion.setFromRotationMatrix(lookMat);
+  cam.position.copy(w2tv(cw));
+  dot.position.copy(w2tv(cw));
+
   const grp = new THREE.Group();
-  grp.add(frustum, bodyObj, sphere);
+  grp.add(frustum, cam, dot);
   return grp;
 }
 
@@ -527,6 +597,13 @@ async function loadConfig() {
       R: d.pose.R,
       t: d.pose.t,
     };
+    // Show the default camera model in the scene immediately so it is visible
+    // even before the first manual measurement is performed (Goal 2).
+    if (d.pose.camera_center_world && d.pose.R) {
+      scene.remove(cameraGroup);
+      cameraGroup = buildCameraModel(d.pose.camera_center_world, d.pose.R);
+      scene.add(cameraGroup);
+    }
   } catch (e) {
     console.warn('Failed to load /config:', e);
   }
