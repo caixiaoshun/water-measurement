@@ -7,3 +7,6 @@
 venv/
 logs/
 outputs/
+node_modules/
+dist/
+*.egg-info/

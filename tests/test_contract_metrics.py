@@ -485,21 +485,23 @@ def test_delivery_artifacts_present() -> None:
     """合同指标(7): 技术报告与核心源码存在性检查。"""
     root = Path(__file__).resolve().parents[1]
 
-    report_candidates = [root / "TECH_REPORT.md", root / "docs" / "report.md"]
+    report_candidates = [
+        root / "TECH_REPORT.md",
+        root / "docs" / "report.md",
+        root / "docs" / "TECH_REPORT.md",
+    ]
     existing_reports = [p for p in report_candidates if p.exists() and p.is_file()]
-    assert existing_reports, "指标(7)失败: TECH_REPORT.md 或 docs/report.md 不存在"
+    assert existing_reports, "指标(7)失败: TECH_REPORT.md 或 docs/report.md 或 docs/TECH_REPORT.md 不存在"
 
     non_empty = [p for p in existing_reports if p.stat().st_size > 0]
     assert non_empty, "指标(7)失败: 技术报告存在但为空"
 
-    required_files = [
-        root / "main.py",
-        root / "vision_ranging.py",
-        root / "water_level.py",
-        root / "config.yaml",
-    ]
-    for path in required_files:
-        assert path.exists(), f"指标(7)失败: 缺少核心文件 {path.name}"
+    # Check source files (support both root and src/ layout)
+    core_modules = ["main.py", "vision_ranging.py", "water_level.py"]
+    for name in core_modules:
+        found = (root / name).exists() or (root / "src" / name).exists()
+        assert found, f"指标(7)失败: 缺少核心文件 {name}"
+    assert (root / "config.yaml").exists(), "指标(7)失败: 缺少 config.yaml"
 
     # 额外做可导入性检查
     importlib.import_module("vision_ranging")

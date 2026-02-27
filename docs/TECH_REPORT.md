@@ -37,9 +37,26 @@
 6. 基准点兼容性 >=2：Aruco 失效时 Circle fallback 仍可更新外参。
 7. 交付物存在性：报告与核心源码文件存在且可导入。
 
-## 5. 执行方式
+## 5. Web 可视化演示
+- 技术栈：FastAPI + 原生 HTML/JavaScript（`web/app.py` + `web/static/index.html`）
+- 端点：`/health`（健康检查）、`/config`（配置摘要）、`/measure`（测距 API）、`/`（前端页面）
+- 前端画布模拟 1280×720 相机视野，支持鼠标点选两点、显示测距结果与诊断信息（置信度、耗时、入射角、状态）
+- 水位参数可实时调整
+- 启动命令：`uvicorn web.app:app --host 0.0.0.0 --port 8765`
+
+## 6. 执行方式
 - 运行 demo：`python main.py --config config.yaml --input 0`
 - 运行合同验收测试：`python -m pytest -q`
 
-## 6. 说明
+## 7. 扩展测试覆盖
+`tests/test_complex_scenarios.py` 覆盖以下复杂因素：
+- 像素抖动（±2px 随机噪声模拟人工点选）
+- 水位跳变与缓慢漂移
+- 姿态漂移 Monte Carlo（平移 >5cm, 倾斜 >2°）
+- 基准点退化（ArUco 遮挡 → circle fallback）
+- 退化几何（近平行射线、远处地平线）
+- 透镜畸变与像素噪声
+- 极值边界（2m / 50m / 亚米级）
+
+## 8. 说明
 测试使用可复现随机种子与可解释几何合成场景，不使用“固定返回通过”的伪逻辑。
