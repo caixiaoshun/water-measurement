@@ -17,11 +17,18 @@
   header .health { font-size: 0.75rem; padding: 2px 10px; border-radius: 12px;
                    background: #1c2128; color: #8b949e; transition: all 0.3s; }
   .main { display: flex; flex: 1; overflow: hidden; height: calc(100vh - 49px); }
-  #canvas-container { flex: 1; position: relative; background: #0d1117; overflow: hidden; }
+  #canvas-container { flex: 1; position: relative; overflow: hidden; }
   #three-canvas { width: 100%; height: 100%; display: block; }
+  /* CSS2DRenderer overlay is appended dynamically */
   .canvas-hint { position: absolute; bottom: 12px; left: 12px; font-size: 0.72rem;
                  color: rgba(139,148,158,0.8); pointer-events: none;
                  background: rgba(13,17,23,0.7); padding: 4px 10px; border-radius: 6px; }
+  /* CSS2D distance label */
+  .label-dist { background: rgba(18,58,120,0.88); color: #cae8ff;
+                padding: 4px 12px; border-radius: 8px; font-size: 0.84rem; font-weight: 700;
+                border: 1px solid #58a6ff; white-space: nowrap;
+                text-shadow: 0 0 10px rgba(88,166,255,0.9);
+                box-shadow: 0 0 14px rgba(88,166,255,0.55); }
   .sidebar { width: 320px; background: #161b22; border-left: 1px solid #30363d;
              overflow-y: auto; display: flex; flex-direction: column; gap: 0; flex-shrink: 0; }
   .card { background: #0d1117; border-bottom: 1px solid #21262d; padding: 14px 16px; }
@@ -144,171 +151,357 @@
       <div class="status-line" id="status-line">请选择测试用例或输入像素坐标</div>
     </div>
 
-    <!-- 说明 -->
+    <!-- 图例说明 -->
     <div class="card">
       <h3>图例说明</h3>
       <div style="font-size:0.72rem;color:#8b949e;line-height:1.8;">
         <span style="color:#ffd700;">&#9632;</span> 金色视锥体 = 相机位置与姿态<br>
-        <span style="color:#1a5f7a;">&#9632;</span> 蓝绿平面 = 水面（含水位高度）<br>
-        <span style="color:#f78166;">&#9632;</span> 红色射线 = 从相机到水面的 3D 光线<br>
-        <span style="color:#e9a045;">&#9632;</span> 橙色连线 = 实际测量距离
+        <span style="color:#1a9fff;">&#9632;</span> 蓝色动态水面 = 真实水面（含水位高度）<br>
+        <span style="color:#00aaff;">&#9632;</span> 科技蓝光束 = 从相机到水面的 3D 光线<br>
+        <span style="color:#ff8800;">&#9632;</span> 橙色连线 = 实际测量距离<br>
+        <span style="color:#58a6ff;">&#9632;</span> 蓝色标签 = 测距数值悬浮显示
       </div>
     </div>
   </div>
 </div>
 
 <script type="importmap">
-{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"}}
+{"imports":{
+  "three":"/static/three/build/three.module.js",
+  "three/addons/":"/static/three/jsm/"
+}}
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Water } from 'three/addons/objects/Water.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-// World (X, Y_depth, Z_up) -> Three.js (X, Z_up, -Y_depth)
+// ── Coordinate helpers ─────────────────────────────────────────────────────
+// World convention: X right, Y depth (forward), Z up
+// Three.js convention: X right, Y up, Z toward viewer
+// Mapping: world(wx,wy,wz) -> three(wx, wz, -wy)
 function w2t(wx, wy, wz) { return new THREE.Vector3(wx, wz, -wy); }
 function w2tv(arr) { return w2t(arr[0], arr[1], arr[2]); }
 
-// Scene setup
+// ── Renderer ───────────────────────────────────────────────────────────────
 const container = document.getElementById('canvas-container');
-const canvas3 = document.getElementById('three-canvas');
+const canvas3   = document.getElementById('three-canvas');
+
 const renderer = new THREE.WebGLRenderer({ canvas: canvas3, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0x0d1117, 1);
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.55;
 
+// CSS2D label renderer (appended on top of the WebGL canvas)
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.style.position     = 'absolute';
+labelRenderer.domElement.style.top          = '0';
+labelRenderer.domElement.style.left         = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+container.appendChild(labelRenderer.domElement);
+
+// ── Scene ──────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x0d1117, 100, 400);
 
-const viewCam = new THREE.PerspectiveCamera(55, 1, 0.05, 1000);
+const viewCam = new THREE.PerspectiveCamera(55, 1, 0.05, 2000);
 viewCam.position.set(14, 10, 14);
 viewCam.lookAt(0, 2, -8);
 
 const controls = new OrbitControls(viewCam, renderer.domElement);
 controls.target.set(0, 2, -8);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 1;
-controls.maxDistance = 300;
+controls.enableDamping  = true;
+controls.dampingFactor  = 0.08;
+controls.minDistance    = 1;
+controls.maxDistance    = 500;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dLight.position.set(10, 20, 10);
+// ── Sky ────────────────────────────────────────────────────────────────────
+const sky = new Sky();
+sky.scale.setScalar(10000);
+scene.add(sky);
+
+const skyUniforms = sky.material.uniforms;
+skyUniforms['turbidity'].value        = 8;
+skyUniforms['rayleigh'].value         = 1.5;
+skyUniforms['mieCoefficient'].value   = 0.005;
+skyUniforms['mieDirectionalG'].value  = 0.8;
+
+const sun = new THREE.Vector3();
+const phi   = THREE.MathUtils.degToRad(87);   // sun near horizon
+const theta = THREE.MathUtils.degToRad(200);
+sun.setFromSphericalCoords(1, phi, theta);
+skyUniforms['sunPosition'].value.copy(sun);
+
+// ── Lighting ───────────────────────────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0xfff0d0, 0.7));
+const dLight = new THREE.DirectionalLight(0xfff8e1, 1.4);
+dLight.position.set(30, 60, 20);
 scene.add(dLight);
 
-// World axes
+// ── Water surface (created once, repositioned when water level changes) ────
+const _waterGeometry = new THREE.PlaneGeometry(400, 400);
+const waterMesh = new Water(_waterGeometry, {
+  textureWidth:    512,
+  textureHeight:   512,
+  waterNormals: new THREE.TextureLoader().load(
+    '/static/three/textures/waternormals.jpg',
+    tex => { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; }
+  ),
+  sunDirection: sun.clone().normalize(),
+  sunColor:       0xffffff,
+  waterColor:     0x001e3c,
+  distortionScale: 3.2,
+  fog: false,
+});
+waterMesh.rotation.x = -Math.PI / 2;
+waterMesh.position.y  = 0;
+scene.add(waterMesh);
+
+// ── World origin axes ──────────────────────────────────────────────────────
 const axes = new THREE.AxesHelper(3);
-axes.position.y = 0.02;
+axes.position.y = 0.03;
 scene.add(axes);
 
+// ── Resize handler ─────────────────────────────────────────────────────────
 function onResize() {
   const w = container.clientWidth, h = container.clientHeight;
   renderer.setSize(w, h, false);
+  labelRenderer.setSize(w, h);
   viewCam.aspect = w / h;
   viewCam.updateProjectionMatrix();
 }
 new ResizeObserver(onResize).observe(container);
 onResize();
 
-(function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, viewCam); })();
-
-// Scene groups
-let waterGroup = new THREE.Group();
-let cameraGroup = new THREE.Group();
+// ── Scene object groups ────────────────────────────────────────────────────
+let cameraGroup  = new THREE.Group();
 let measureGroup = new THREE.Group();
-scene.add(waterGroup, cameraGroup, measureGroup);
+scene.add(cameraGroup, measureGroup);
 
-function buildWaterPlane(h) {
-  const g = new THREE.Group();
-  // Surface mesh
-  const geo = new THREE.PlaneGeometry(80, 80);
-  geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1a5f7a, transparent: true, opacity: 0.5, side: THREE.DoubleSide, roughness: 0.9 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.y = h;
-  g.add(mesh);
-  // Grid
-  const grid = new THREE.GridHelper(80, 40, 0x1e7a9c, 0x1a4d5e);
-  grid.position.y = h + 0.01;
-  g.add(grid);
-  return g;
+// ── Camera fly-to animation ────────────────────────────────────────────────
+const FLY_DURATION_S = 1.3;
+let flyFrom    = null;
+let flyTarget  = null;
+let flyT       = 1.0;
+let flyStart   = 0;
+
+function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+
+function startFly(toPos, toTarget) {
+  flyFrom   = { pos: viewCam.position.clone(), target: controls.target.clone() };
+  flyTarget = { pos: toPos, target: toTarget };
+  flyT      = 0.0;
+  flyStart  = performance.now();
 }
 
-function buildCameraFrustum(cw, R) {
-  // R[row][col]: R[i][j] means R_ij
-  // Camera optical axis in world = R^T[:,2] = [R[0][2], R[1][2], R[2][2]]
-  const zw = [R[0][2], R[1][2], R[2][2]];
-  const xw = [R[0][0], R[1][0], R[2][0]];
-  const yw = [R[0][1], R[1][1], R[2][1]];
-  const add = (a,b) => [a[0]+b[0],a[1]+b[1],a[2]+b[2]];
-  const mul = (a,s) => [a[0]*s,a[1]*s,a[2]*s];
+// ── Render loop ────────────────────────────────────────────────────────────
+(function animate(time) {
+  requestAnimationFrame(animate);
+
+  // Animate water surface
+  waterMesh.material.uniforms['time'].value += 1.0 / 60.0;
+
+  // Camera fly animation
+  if (flyT < 1.0) {
+    flyT = Math.min((performance.now() - flyStart) / (FLY_DURATION_S * 1000), 1.0);
+    const t = easeInOut(flyT);
+    viewCam.position.lerpVectors(flyFrom.pos, flyTarget.pos, t);
+    controls.target.lerpVectors(flyFrom.target, flyTarget.target, t);
+  }
+
+  controls.update();
+  renderer.render(scene, viewCam);
+  labelRenderer.render(scene, viewCam);
+})();
+
+// ── Camera model (frustum wire + body mesh + glow sphere) ─────────────────
+function buildCameraModel(cw, R) {
+  // Column vectors of R^T give camera axes in world coords
+  const zw = [R[0][2], R[1][2], R[2][2]];   // optical axis (forward)
+  const xw = [R[0][0], R[1][0], R[2][0]];   // right
+  const yw = [R[0][1], R[1][1], R[2][1]];   // down (camera Y)
+
+  const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+  const mul = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+
   const depth = 3.0, fH = 1.2, fV = 0.7;
-  const front = add(cw, mul(zw, depth));
+  const front   = add(cw, mul(zw, depth));
   const corners = [
-    add(add(front, mul(xw, fH)), mul(yw, fV)),
-    add(add(front, mul(xw, -fH)), mul(yw, fV)),
-    add(add(front, mul(xw, -fH)), mul(yw, -fV)),
-    add(add(front, mul(xw, fH)), mul(yw, -fV)),
+    add(add(front,  mul(xw,  fH)), mul(yw,  fV)),
+    add(add(front,  mul(xw, -fH)), mul(yw,  fV)),
+    add(add(front,  mul(xw, -fH)), mul(yw, -fV)),
+    add(add(front,  mul(xw,  fH)), mul(yw, -fV)),
   ];
+
+  // Frustum wireframe
   const pts = [];
-  for (const c of corners) { pts.push(w2tv(cw), w2tv(c)); }
+  for (const c of corners)  { pts.push(w2tv(cw), w2tv(c)); }
   for (let i = 0; i < 4; i++) { pts.push(w2tv(corners[i]), w2tv(corners[(i+1)%4])); }
-  pts.push(w2tv(cw), w2tv(add(cw, mul(zw, depth * 1.4))));
-  const fGeo = new THREE.BufferGeometry().setFromPoints(pts);
-  const fMat = new THREE.LineBasicMaterial({ color: 0xffd700 });
-  const frustum = new THREE.LineSegments(fGeo, fMat);
-  const spGeo = new THREE.SphereGeometry(0.25, 12, 8);
-  const spMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.4 });
-  const sp = new THREE.Mesh(spGeo, spMat);
-  sp.position.copy(w2tv(cw));
+  pts.push(w2tv(cw), w2tv(add(cw, mul(zw, depth * 1.5))));
+  const frustum = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0xffd700 })
+  );
+
+  // Camera body (box)
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.3, 0.75),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.55, metalness: 0.5 })
+  );
+
+  // Lens (cylinder)
+  const lens = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.14, 0.17, 0.38, 20),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.08, metalness: 0.9 })
+  );
+  lens.rotation.x = Math.PI / 2;
+  lens.position.z = 0.55;
+
+  // Glow sphere marking camera centre
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 18, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.6, roughness: 0.25
+    })
+  );
+
+  // Orient body/lens along the camera optical axis (world Z direction -> three Z direction)
+  const zwT = new THREE.Vector3(zw[0], zw[2], -zw[1]).normalize();
+  const upT  = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(zwT.dot(upT)) > 0.999) upT.set(1, 0, 0);
+  const bodyObj = new THREE.Group();
+  bodyObj.add(body, lens);
+  bodyObj.quaternion.setFromRotationMatrix(
+    new THREE.Matrix4().lookAt(new THREE.Vector3(), zwT, upT)
+  );
+  bodyObj.position.copy(w2tv(cw));
+  sphere.position.copy(w2tv(cw));
+
   const grp = new THREE.Group();
-  grp.add(frustum, sp);
+  grp.add(frustum, bodyObj, sphere);
   return grp;
 }
 
-function buildMeasurement(cc, p1, p2) {
-  const g = new THREE.Group();
-  const cpv = w2tv(cc), p1v = w2tv(p1), p2v = w2tv(p2);
-  // Rays
-  [[cpv, p1v], [cpv, p2v]].forEach(([a,b]) => {
-    const geo = new THREE.BufferGeometry().setFromPoints([a,b]);
-    g.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xf78166, transparent: true, opacity: 0.8 })));
-  });
-  // Intersection spheres
-  const sGeo = new THREE.SphereGeometry(0.15, 12, 8);
-  [{ pos: p1v, c: 0xf78166 }, { pos: p2v, c: 0x3fb950 }].forEach(({ pos, c }) => {
-    const m = new THREE.Mesh(sGeo, new THREE.MeshStandardMaterial({ color: c, roughness: 0.3 }));
-    m.position.copy(pos);
-    g.add(m);
-  });
-  // Distance line
-  const dGeo = new THREE.BufferGeometry().setFromPoints([p1v, p2v]);
-  g.add(new THREE.Line(dGeo, new THREE.LineBasicMaterial({ color: 0xe9a045 })));
+// ── Glowing line ───────────────────────────────────────────────────────────
+function makeGlowLine(a, b, color) {
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([a, b]),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending })
+  );
+}
+
+// ── Ripple / glow marker at a water intersection point ─────────────────────
+function makeRippleMarker(pos, color) {
+  const grp = new THREE.Group();
+  grp.position.copy(pos);
+
+  // Glow sphere
+  grp.add(new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 18, 12),
+    new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 1.1, transparent: true, opacity: 0.92
+    })
+  ));
+
+  // Two concentric rings lying flat on the water
+  for (const r of [0.38, 0.62]) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(r, r + 0.045, 36),
+      new THREE.MeshBasicMaterial({
+        color, side: THREE.DoubleSide, transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    grp.add(ring);
+  }
+  return grp;
+}
+
+// ── Full measurement visualisation ─────────────────────────────────────────
+function buildMeasurement(cc, p1, p2, distM) {
+  const g    = new THREE.Group();
+  const cpv  = w2tv(cc);
+  const p1v  = w2tv(p1);
+  const p2v  = w2tv(p2);
+
+  // Rays: tech-blue glow from camera to water intersections
+  g.add(makeGlowLine(cpv, p1v, 0x00aaff));
+  g.add(makeGlowLine(cpv, p2v, 0x00aaff));
+
+  // Measurement baseline: orange glow
+  g.add(makeGlowLine(p1v, p2v, 0xff8800));
+
+  // Ripple markers at intersection points
+  g.add(makeRippleMarker(p1v, 0xf78166));
+  g.add(makeRippleMarker(p2v, 0x3fb950));
+
+  // CSS2D floating distance label at midpoint (only when we have a real result)
+  if (distM != null) {
+    const mid = new THREE.Vector3().addVectors(p1v, p2v).multiplyScalar(0.5);
+    mid.y += 0.8;
+    const div = document.createElement('div');
+    div.className   = 'label-dist';
+    div.textContent = distM.toFixed(3) + ' m';
+    const lbl = new CSS2DObject(div);
+    lbl.position.copy(mid);
+    g.add(lbl);
+  }
+
   return g;
 }
 
-function updateScene(data) {
+// ── Update scene state ─────────────────────────────────────────────────────
+function updateScene(data, distM) {
   const wl = data.water_level_m != null ? data.water_level_m : 0;
-  scene.remove(waterGroup); waterGroup = buildWaterPlane(wl); scene.add(waterGroup);
-  scene.remove(cameraGroup); cameraGroup = new THREE.Group();
+
+  // Smoothly raise/lower water (just reposition the single Water mesh)
+  waterMesh.position.y = wl;
+
+  // Camera frustum + model
+  scene.remove(cameraGroup);
+  cameraGroup = new THREE.Group();
   if (data.camera_center_world && data.camera_pose_R) {
-    cameraGroup = buildCameraFrustum(data.camera_center_world, data.camera_pose_R);
+    cameraGroup = buildCameraModel(data.camera_center_world, data.camera_pose_R);
   }
   scene.add(cameraGroup);
-  scene.remove(measureGroup); measureGroup = new THREE.Group();
+
+  // Measurement rays & labels
+  scene.remove(measureGroup);
+  measureGroup = new THREE.Group();
   if (data.point1_world && data.point2_world && data.camera_center_world) {
-    measureGroup = buildMeasurement(data.camera_center_world, data.point1_world, data.point2_world);
+    measureGroup = buildMeasurement(
+      data.camera_center_world, data.point1_world, data.point2_world, distM
+    );
   }
   scene.add(measureGroup);
+
+  // Fly viewer camera to a good vantage point for this scene
+  if (data.camera_center_world) {
+    const cc = w2tv(data.camera_center_world);
+    const focus = (data.point1_world && data.point2_world)
+      ? new THREE.Vector3().addVectors(w2tv(data.point1_world), w2tv(data.point2_world)).multiplyScalar(0.5)
+      : new THREE.Vector3(cc.x, 0, cc.z);
+    const span = Math.max(cc.distanceTo(focus) * 1.6, 12);
+    startFly(
+      new THREE.Vector3(focus.x + span * 0.55, Math.max(cc.y + span * 0.35, 4), focus.z + span * 0.55),
+      focus
+    );
+  }
 }
 
+// ── Reset to default scene ─────────────────────────────────────────────────
 function resetScene() {
-  scene.remove(waterGroup, cameraGroup, measureGroup);
-  waterGroup = buildWaterPlane(0);
-  cameraGroup = new THREE.Group();
+  waterMesh.position.y = 0;
+  scene.remove(cameraGroup, measureGroup);
+  cameraGroup  = new THREE.Group();
   measureGroup = new THREE.Group();
-  scene.add(waterGroup, cameraGroup, measureGroup);
+  scene.add(cameraGroup, measureGroup);
+  startFly(new THREE.Vector3(14, 10, 14), new THREE.Vector3(0, 2, -8));
 }
-resetScene();
 
+// ── Result panel ───────────────────────────────────────────────────────────
 function updateResultPanel(mr, expectedDist, relError, passed) {
   const dv = document.getElementById('dist-value');
   if (mr.success && mr.distance_m != null) {
@@ -320,17 +513,22 @@ function updateResultPanel(mr, expectedDist, relError, passed) {
     dv.style.color = '#8b949e';
     document.getElementById('dist-meta').textContent = mr.message || '';
   }
-  document.getElementById('d-conf').textContent = mr.confidence != null ? mr.confidence.toFixed(3) : '—';
-  document.getElementById('d-time').textContent = mr.elapsed_ms != null ? mr.elapsed_ms.toFixed(2) + ' ms' : '—';
+  document.getElementById('d-conf').textContent =
+    mr.confidence != null ? mr.confidence.toFixed(3) : '—';
+  document.getElementById('d-time').textContent =
+    mr.elapsed_ms != null ? mr.elapsed_ms.toFixed(2) + ' ms' : '—';
   const graz = (mr.diagnostics || {}).grazing;
-  document.getElementById('d-graz').textContent = graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
+  document.getElementById('d-graz').textContent =
+    graz ? graz.map(g => g.toFixed(4)).join(', ') : '—';
   document.getElementById('d-stat').textContent = mr.message || '—';
-  document.getElementById('d-wl').textContent = mr.water_level_m != null ? mr.water_level_m.toFixed(2) + ' m' : '—';
+  document.getElementById('d-wl').textContent =
+    mr.water_level_m != null ? mr.water_level_m.toFixed(2) + ' m' : '—';
+
   let html = '';
   if (passed === true) {
-    html = `<span class="result-badge result-pass">&#10003; 通过${relError != null ? ' (误差 ' + (relError*100).toFixed(2) + '%)' : ''}</span>`;
+    html = `<span class="result-badge result-pass">&#10003; 通过${relError != null ? ' (误差 ' + (relError * 100).toFixed(2) + '%)' : ''}</span>`;
   } else if (passed === false) {
-    html = `<span class="result-badge result-fail">&#10007; 未通过${relError != null ? ' (误差 ' + (relError*100).toFixed(2) + '%)' : ''}</span>`;
+    html = `<span class="result-badge result-fail">&#10007; 未通过${relError != null ? ' (误差 ' + (relError * 100).toFixed(2) + '%)' : ''}</span>`;
   } else if (passed === null && expectedDist == null) {
     html = '<span class="result-badge result-info">退化场景（预期失败）</span>';
   }
@@ -340,12 +538,13 @@ function updateResultPanel(mr, expectedDist, relError, passed) {
   document.getElementById('result-badge-area').innerHTML = html;
 }
 
-// Test cases
+// ── Test cases ─────────────────────────────────────────────────────────────
 let tcCache = [];
+
 async function loadTestCases() {
   try {
     const r = await fetch('/test_cases');
-    tcCache = await r.json();
+    tcCache  = await r.json();
     const el = document.getElementById('tc-list');
     el.innerHTML = tcCache.map(tc =>
       `<div class="tc-item" data-id="${tc.id}">
@@ -357,61 +556,81 @@ async function loadTestCases() {
     el.querySelectorAll('.tc-item').forEach(item => {
       item.addEventListener('click', () => selectTestCase(item.dataset.id));
     });
-  } catch(e) {
-    document.getElementById('tc-list').innerHTML = `<div style="color:#f78166;font-size:0.75rem;">加载失败: ${e.message}</div>`;
+  } catch (e) {
+    document.getElementById('tc-list').innerHTML =
+      `<div style="color:#f78166;font-size:0.75rem;">加载失败: ${e.message}</div>`;
   }
 }
 
 async function selectTestCase(id) {
-  document.querySelectorAll('.tc-item').forEach(el => el.classList.toggle('active', el.dataset.id === id));
-  const tc = tcCache.find(t => t.id === id);
+  document.querySelectorAll('.tc-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.id === id)
+  );
+  const tc     = tcCache.find(t => t.id === id);
   const descEl = document.getElementById('tc-desc');
   if (tc) { descEl.textContent = tc.description; descEl.style.display = 'block'; }
   document.getElementById('status-line').textContent = '正在运行测试用例…';
   try {
-    const r = await fetch('/test_cases/' + encodeURIComponent(id) + '/run', { method: 'POST', headers: {'Content-Type':'application/json'} });
-    const d = await r.json();
+    const r = await fetch('/test_cases/' + encodeURIComponent(id) + '/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const d  = await r.json();
     const mr = d.measure_result;
-    updateScene({ camera_center_world: mr.camera_center_world, camera_pose_R: mr.camera_pose_R,
-                  point1_world: mr.point1_world, point2_world: mr.point2_world, water_level_m: mr.water_level_m });
+    updateScene(
+      { camera_center_world: mr.camera_center_world, camera_pose_R: mr.camera_pose_R,
+        point1_world: mr.point1_world, point2_world: mr.point2_world,
+        water_level_m: mr.water_level_m },
+      mr.success ? mr.distance_m : null
+    );
     updateResultPanel(mr, d.expected_distance_m, d.relative_error, d.passed);
     document.getElementById('status-line').textContent = '已加载: ' + d.name;
-  } catch(e) {
+  } catch (e) {
     document.getElementById('status-line').textContent = '运行失败: ' + e.message;
   }
 }
 
+// ── Manual measure button ──────────────────────────────────────────────────
 document.getElementById('btn-measure').addEventListener('click', async () => {
   const x1 = parseFloat(document.getElementById('px1-x').value);
   const y1 = parseFloat(document.getElementById('px1-y').value);
   const x2 = parseFloat(document.getElementById('px2-x').value);
   const y2 = parseFloat(document.getElementById('px2-y').value);
-  if ([x1,y1,x2,y2].some(isNaN)) { document.getElementById('status-line').textContent = '请填写完整的像素坐标'; return; }
+  if ([x1, y1, x2, y2].some(isNaN)) {
+    document.getElementById('status-line').textContent = '请填写完整的像素坐标';
+    return;
+  }
   const wl = parseFloat(document.getElementById('wl-input').value) || 0;
   document.getElementById('status-line').textContent = '测量中…';
   try {
-    const r = await fetch('/measure', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ point1:{x:x1,y:y1}, point2:{x:x2,y:y2}, water_level_m:wl }) });
+    const r = await fetch('/measure', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ point1: { x: x1, y: y1 }, point2: { x: x2, y: y2 }, water_level_m: wl })
+    });
     const d = await r.json();
-    updateScene({ camera_center_world:d.camera_center_world, camera_pose_R:d.camera_pose_R,
-                  point1_world:d.point1_world, point2_world:d.point2_world, water_level_m:d.water_level_m });
+    updateScene(
+      { camera_center_world: d.camera_center_world, camera_pose_R: d.camera_pose_R,
+        point1_world: d.point1_world, point2_world: d.point2_world,
+        water_level_m: d.water_level_m },
+      d.success ? d.distance_m : null
+    );
     updateResultPanel(d, null, null, null);
     document.getElementById('status-line').textContent = '手动测量完成';
-  } catch(e) {
+  } catch (e) {
     document.getElementById('status-line').textContent = '请求失败: ' + e.message;
   }
 });
 
+// ── Reset button ───────────────────────────────────────────────────────────
 document.getElementById('btn-reset').addEventListener('click', () => {
   resetScene();
   document.querySelectorAll('.tc-item').forEach(el => el.classList.remove('active'));
   document.getElementById('tc-desc').style.display = 'none';
-  ['dist-value','dist-meta','result-badge-area','d-conf','d-time','d-graz','d-stat','d-wl'].forEach(id => {
+  ['dist-value', 'dist-meta', 'result-badge-area', 'd-conf', 'd-time', 'd-graz', 'd-stat', 'd-wl'].forEach(id => {
     document.getElementById(id).innerHTML = id === 'dist-value' ? '&#8212;' : '';
   });
   document.getElementById('status-line').textContent = '场景已重置';
 });
 
+// ── Health check ───────────────────────────────────────────────────────────
 async function checkHealth() {
   const b = document.getElementById('health-badge');
   try {
